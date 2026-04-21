@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
-	import { PRACTICE_PROMPTS, randomPromptIndex } from '$lib/prompts';
+	import type { PracticeCategoryId } from '$lib/practice-catalog';
+	import {
+		PRACTICE_CATEGORY_HINTS,
+		PRACTICE_CATEGORY_LABELS,
+		PRACTICE_CATEGORY_ORDER,
+		getPracticeItems,
+		randomItemIndex
+	} from '$lib/practice-catalog';
 	import type { CorrectionResult } from '$lib/correction';
 	import {
 		loadHistory,
@@ -19,7 +26,8 @@
 	type PracticeMode = 'write' | 'speak';
 
 	let practiceMode = $state<PracticeMode>('write');
-	let promptIndex = $state(randomPromptIndex());
+	let categoryId = $state<PracticeCategoryId>('daily');
+	let itemIndex = $state(randomItemIndex('daily'));
 	let answer = $state('');
 	let loading = $state(false);
 	let errorMessage = $state<string | null>(null);
@@ -45,7 +53,11 @@
 		if (practiceMode !== 'speak') stopDictation();
 	});
 
-	const currentPrompt = $derived(PRACTICE_PROMPTS[promptIndex] ?? PRACTICE_PROMPTS[0]);
+	const currentItem = $derived.by(() => {
+		const items = getPracticeItems(categoryId);
+		return items[itemIndex] ?? items[0];
+	});
+	const currentPrompt = $derived(currentItem.prompt);
 
 	function stopDictation(): void {
 		dictation?.stop();
@@ -83,13 +95,24 @@
 
 	onDestroy(() => stopDictation());
 
+	function setCategory(id: PracticeCategoryId): void {
+		if (id === categoryId) return;
+		stopDictation();
+		categoryId = id;
+		itemIndex = randomItemIndex(id);
+		answer = '';
+		result = null;
+		errorMessage = null;
+	}
+
 	function newPrompt(): void {
 		stopDictation();
-		const nextIdx = randomPromptIndex(promptIndex);
-		promptIndex = nextIdx;
+		const nextIdx = randomItemIndex(categoryId, itemIndex);
+		itemIndex = nextIdx;
 		errorMessage = null;
 		result = null;
-		const nextText = PRACTICE_PROMPTS[nextIdx] ?? PRACTICE_PROMPTS[0];
+		const items = getPracticeItems(categoryId);
+		const nextText = items[nextIdx]?.prompt ?? items[0].prompt;
 		if (practiceMode === 'speak' && ttsSupported) speakGerman(nextText);
 	}
 
@@ -176,9 +199,31 @@
 		<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Day-one practice</p>
 		<h1 class="text-3xl font-semibold tracking-tight text-stone-900 sm:text-4xl">German Mirror</h1>
 		<p class="max-w-2xl text-base leading-relaxed text-stone-600">
-			Answer one prompt in German — by typing or by speaking — then get a corrected version, a more natural
-			phrasing, a simple English line, and one short tip.
+			Pick a topic, then answer in German — by typing or by speaking — and get corrections. Numbers and alphabet
+			include an optional example line you can hear for pronunciation.
 		</p>
+		<div class="space-y-2">
+			<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Topic</p>
+			<div
+				class="flex flex-wrap gap-1 rounded-xl border border-stone-200 bg-stone-100/90 p-1 shadow-inner"
+				role="group"
+				aria-label="Practice topic"
+			>
+				{#each PRACTICE_CATEGORY_ORDER as cid (cid)}
+					<button
+						type="button"
+						class="min-w-0 flex-1 rounded-lg px-2.5 py-2 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 sm:flex-none sm:px-3 sm:text-sm {categoryId ===
+						cid
+							? 'bg-white text-stone-900 shadow-sm'
+							: 'text-stone-600 hover:text-stone-900'}"
+						onclick={() => setCategory(cid)}
+					>
+						{PRACTICE_CATEGORY_LABELS[cid]}
+					</button>
+				{/each}
+			</div>
+			<p class="text-xs leading-relaxed text-stone-500">{PRACTICE_CATEGORY_HINTS[categoryId]}</p>
+		</div>
 		<div
 			class="flex max-w-md rounded-xl border border-stone-200 bg-stone-100/90 p-1 shadow-inner"
 			role="group"
@@ -221,8 +266,34 @@
 	<section class="rounded-2xl border border-stone-200/80 bg-white p-5 shadow-sm sm:p-6" aria-label="Prompt">
 		<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 			<div class="space-y-3">
-				<h2 class="text-sm font-semibold text-stone-900">Today’s prompt</h2>
+				<div class="flex flex-wrap items-center gap-2">
+					<h2 class="text-sm font-semibold text-stone-900">Task</h2>
+					<span
+						class="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-xs font-medium text-stone-600"
+					>
+						{PRACTICE_CATEGORY_LABELS[categoryId]}
+					</span>
+				</div>
 				<p class="text-lg leading-relaxed text-stone-800">{currentPrompt}</p>
+				{#if currentItem.learnText}
+					<div
+						class="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-3 text-sm text-emerald-950"
+					>
+						<p class="text-xs font-semibold uppercase tracking-wide text-emerald-900/70">Example / pronunciation</p>
+						<p class="mt-1.5 leading-relaxed text-emerald-950">{currentItem.learnText}</p>
+						{#if ttsSupported}
+							<button
+								type="button"
+								class="mt-2 inline-flex items-center gap-2 rounded-lg border border-emerald-200/80 bg-white px-3 py-1.5 text-xs font-medium text-emerald-900 shadow-sm transition hover:bg-emerald-50/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
+								aria-label="Listen to example in German"
+								onclick={() => speakGerman(currentItem.learnText ?? '')}
+							>
+								<span class="text-emerald-700" aria-hidden="true">▶</span>
+								Listen to example (German)
+							</button>
+						{/if}
+					</div>
+				{/if}
 				{#if ttsSupported}
 					<button
 						type="button"
@@ -231,7 +302,7 @@
 						onclick={() => speakGerman(currentPrompt)}
 					>
 						<span class="text-stone-600" aria-hidden="true">▶</span>
-						Listen to prompt (German)
+						Listen to task (German)
 					</button>
 				{/if}
 				{#if practiceMode === 'speak' && ttsSupported}
