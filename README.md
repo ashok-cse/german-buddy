@@ -1,6 +1,6 @@
-# German Mirror
+# German Buddy
 
-A minimal **SvelteKit** app for day-one German practice: you answer one real-life prompt in German, then get instant structured feedback (corrected text, a more natural version, simple English, and one short tip). Recent runs are saved **only in the browser** (`localStorage`).
+A minimal **SvelteKit** app for day-one German practice: answer a real-life prompt in German (type or dictate), hear the prompt read aloud if you like, then get structured feedback — corrected text, a more natural phrasing, a simple English line, and one short tip. Recent runs stay **only in your browser** (`localStorage`). The server uses an OpenAI-compatible API (**Groq** by default) for corrections.
 
 ## Install
 
@@ -25,6 +25,8 @@ cp .env.example .env
 
 The server calls `POST {LLM_BASE_URL}/chat/completions` with an OpenAI-compatible payload. **Groq** is the default host; set `LLM_BASE_URL` + `LLM_MODEL` to use OpenAI or another compatible API. Discover Groq model ids with `GET https://api.groq.com/openai/v1/models` or the [Groq models docs](https://console.groq.com/docs/models).
 
+**Public repos:** keep real keys in `.env` only (gitignored). Never commit secrets; leave `.env.example` without real values.
+
 ## Run locally
 
 ```bash
@@ -42,7 +44,7 @@ npm run preview
 
 ## Architecture (brief)
 
-- **`src/routes/+page.svelte`** — Single-page UI: prompt, textarea, loading/error/empty states, feedback cards, history, copy + optional **Read aloud** (`speechSynthesis`, `de-DE`).
+- **`src/routes/+page.svelte`** — Single-page UI: writing / speaking modes, prompt TTS (`speechSynthesis`, `de-DE`), dictation where supported, textarea, feedback cards, history, copy + **Read aloud** on corrections.
 - **`src/lib/prompts.ts`** — Fifteen fixed practice prompts; random on load; “New prompt” picks a different one.
 - **`src/routes/api/correct/+server.ts`** — `POST` JSON `{ prompt, answer }` → returns `{ original, corrected, natural, english, tip }`.
 - **`src/lib/server/llm/`** — Small **provider boundary**: `LlmProvider` + OpenAI-compatible HTTP client; **`src/lib/server/llm/factory.ts`** wires env vars so you can swap implementations in one place.
@@ -51,4 +53,3 @@ npm run preview
 - **`src/lib/history.ts`** — `localStorage` read/write for the last **10** entries (`prompt`, `original`, `corrected`, `timestamp`).
 
 No auth, no database, no external UI kit — **Tailwind CSS v4** via Vite plugin (`src/routes/layout.css`).
-# german-buddy
