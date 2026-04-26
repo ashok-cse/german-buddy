@@ -97,6 +97,9 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 
 	rec.onerror = (event: SpeechRecognitionErrorEvent) => {
 		if (event.error === 'aborted') return;
+		// Non-fatal: Chrome throws this after a short silence; let `onend` restart the session
+		// while `active` is still true so continuous listening keeps working.
+		if (event.error === 'no-speech') return;
 		active = false;
 		try {
 			rec.stop();
@@ -106,23 +109,73 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 		handlers.onError(humanError(event.error));
 	};
 
-	rec.onend = () => {
+	let restartAttempts = 0;
+	const MAX_QUICK_RESTARTS = 6;
+	let restartTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const clearRestartTimer = () => {
+		if (restartTimer !== null) {
+			clearTimeout(restartTimer);
+			restartTimer = null;
+		}
+	};
+
+	const tryStart = () => {
+		clearRestartTimer();
 		if (!active) {
 			notifyStopped();
 			return;
 		}
 		try {
 			rec.start();
-		} catch {
-			active = false;
-			notifyStopped();
+			restartAttempts = 0;
+		} catch (err) {
+			const name = (err as { name?: string } | null)?.name ?? '';
+			if (name === 'InvalidStateError') {
+				// Previous session not yet released — wait briefly and try again.
+				restartTimer = setTimeout(tryStart, 200);
+				return;
+			}
+			restartAttempts += 1;
+			if (restartAttempts <= MAX_QUICK_RESTARTS) {
+				restartTimer = setTimeout(tryStart, 200 * restartAttempts);
+			} else {
+				active = false;
+				handlers.onError('Microphone stopped. Tap Start to resume.');
+				notifyStopped();
+			}
 		}
+	};
+
+	rec.onend = () => {
+		if (!active) {
+			notifyStopped();
+			return;
+		}
+		// Chrome can fire `onend` after silence even with continuous=true. Restart on
+		// a tiny delay so the audio pipeline fully releases before re-arming.
+		restartTimer = setTimeout(tryStart, 120);
 	};
 
 	try {
 		rec.start();
 		handlers.onReady?.();
-	} catch {
+	} catch (err) {
+		const name = (err as { name?: string } | null)?.name ?? '';
+		if (name === 'InvalidStateError') {
+			restartTimer = setTimeout(tryStart, 200);
+			return {
+				stop: () => {
+					active = false;
+					clearRestartTimer();
+					try {
+						rec.stop();
+					} catch {
+						/* ignore */
+					}
+				}
+			};
+		}
 		active = false;
 		handlers.onError('Could not start the microphone. Check permissions and try again.');
 		notifyStopped();
@@ -132,6 +185,7 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 	return {
 		stop: () => {
 			active = false;
+			clearRestartTimer();
 			try {
 				rec.stop();
 			} catch {

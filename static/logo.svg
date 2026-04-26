@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="German Buddy">
+	<title>German Buddy</title>
+	<path
+		d="M16 10 L48 10 A8 8 0 0 1 56 18 L56 36 A8 8 0 0 1 48 44 L30 44 L22 54 L18 44 L16 44 A8 8 0 0 1 8 36 L8 18 A8 8 0 0 1 16 10 Z"
+		fill="#1c1917"
+	/>
+	<circle cx="24" cy="26" r="3.5" fill="#fafaf9" />
+	<circle cx="40" cy="26" r="3.5" fill="#f59e0b" />
+	<path
+		d="M24 33 Q32 39 40 33"
+		stroke="#fafaf9"
+		stroke-width="2"
+		stroke-linecap="round"
+		fill="none"
+	/>
+</svg>

@@ -57,9 +57,16 @@ The repo includes a **multi-stage `Dockerfile`** (`@sveltejs/adapter-node`): the
 3. Expose **port 3000** to the internet (or set `PORT` in the panel to match the port you publish).
 4. If links or cookies misbehave behind your reverse proxy, set **`ORIGIN`** to your public site URL (for example `https://your-domain.com`) as described in the [SvelteKit adapter-node docs](https://svelte.dev/docs/kit/adapter-node#Environment-variables).
 
+## Routes
+
+- **`/`** — Minimalistic landing page for **germanbuddy.ai** with a waitlist signup.
+- **`/app`** — The full practice app (write / speak / chat). `/dashboard` redirects here.
+
 ## Architecture (brief)
 
-- **`src/routes/+page.svelte`** — Single-page UI: writing / speaking modes, prompt TTS (`speechSynthesis`, `de-DE`), dictation where supported, textarea, feedback cards, history, copy + **Read aloud** on corrections.
+- **`src/routes/+page.svelte`** — Marketing landing page with a waitlist email form (`POST /api/waitlist`).
+- **`src/routes/app/+page.svelte`** — The practice app: writing / speaking / chat modes, prompt TTS (`speechSynthesis`, `de-DE`), dictation where supported, textarea, feedback cards, history, copy + **Read aloud** on corrections.
+- **`src/routes/api/waitlist/+server.ts`** — `POST` `{ email }`; appends to `data/waitlist.jsonl` and logs (best-effort, never fails the request).
 - **`src/lib/prompts.ts`** / **`src/lib/practice-catalog.ts`** — Daily-life prompts plus numbers/alphabet topics; “New prompt” randomizes within the selected topic.
 - **`src/routes/api/correct/+server.ts`** — `POST` JSON `{ prompt, answer }` → returns `{ original, corrected, natural, english, tip }`.
 - **`src/lib/server/llm/`** — Small **provider boundary**: `LlmProvider` + OpenAI-compatible HTTP client; **`src/lib/server/llm/factory.ts`** wires env vars so you can swap implementations in one place.
