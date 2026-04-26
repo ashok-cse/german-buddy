@@ -42,6 +42,8 @@ cp .env.example .env
 | `LLM_BASE_URL` | No | API root (default: `https://api.groq.com/openai/v1`) |
 | `LLM_MODEL` | No | Model id (default: `llama-3.3-70b-versatile`; try `llama-3.1-8b-instant`, `openai/gpt-oss-120b`, …) |
 | `LLM_JSON_OBJECT` | No | `true` / `false` — request JSON-object mode (default: `true`) |
+| `APP_USERNAME` | No | HTTP Basic auth username for `/app`, `/dashboard`, `/api/correct`, `/api/converse`. Leave empty to keep the app open. |
+| `APP_PASSWORD` | No | HTTP Basic auth password (paired with `APP_USERNAME`). Both must be set to enable protection. |
 
 The server calls `POST {LLM_BASE_URL}/chat/completions` with an OpenAI-compatible payload. Set `LLM_BASE_URL` + `LLM_MODEL` to swap to OpenAI or any other compatible provider. Discover Groq model ids with `GET https://api.groq.com/openai/v1/models` or the [Groq models docs](https://console.groq.com/docs/models).
 
@@ -81,17 +83,20 @@ The waitlist endpoint persists signups to `./data/waitlist.jsonl`. Mount a volum
 
 ## Routes
 
-| Route | Purpose |
-|-------|---------|
-| `/` | Landing page — branding + waitlist signup |
-| `/app` | Practice app (write / speak / chat) |
-| `/dashboard` | 302 redirect → `/app` |
-| `POST /api/correct` | `{ prompt, answer }` → `{ original, corrected, natural, english, tip }` |
-| `POST /api/converse` | `{ messages, level, scenario, style }` → assistant reply + word-level corrections + pronunciation |
-| `POST /api/waitlist` | `{ email }` → appends to `data/waitlist.jsonl` and logs (best-effort) |
+| Route | Purpose | Auth |
+|-------|---------|------|
+| `/` | Landing page — branding + waitlist signup | public |
+| `/app` | Practice app (write / speak / chat) | Basic auth |
+| `/dashboard` | 302 redirect → `/app` | Basic auth |
+| `POST /api/correct` | `{ prompt, answer }` → `{ original, corrected, natural, english, tip }` | Basic auth |
+| `POST /api/converse` | `{ messages, level, scenario, style }` → assistant reply + word-level corrections + pronunciation | Basic auth |
+| `POST /api/waitlist` | `{ email }` → appends to `data/waitlist.jsonl` and logs (best-effort) | public |
+
+Auth is enforced by `src/hooks.server.ts` via the **`APP_USERNAME`** / **`APP_PASSWORD`** env vars. If either is empty, the protected routes stay open and a one-time warning is logged — useful for local dev. Once you set both in production, the browser shows the standard Basic-auth prompt the first time someone hits `/app`, and the protected APIs reuse the same cached credentials automatically (same-origin `fetch` defaults).
 
 ## Architecture
 
+- **`src/hooks.server.ts`** — HTTP Basic auth gate for `/app`, `/dashboard`, `/api/correct`, `/api/converse`. Reads `APP_USERNAME` / `APP_PASSWORD` from env at runtime; no-op when either is empty.
 - **`src/routes/+page.svelte`** — marketing landing page + waitlist form.
 - **`src/routes/app/+page.svelte`** — practice app UI: write / speak / chat modes, TTS (`speechSynthesis` for `de-DE` + `en-*`), dictation, feedback cards, history.
 - **`src/routes/api/{correct,converse,waitlist}/+server.ts`** — POST endpoints.
