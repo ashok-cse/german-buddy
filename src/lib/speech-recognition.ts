@@ -37,6 +37,25 @@ export type DictationHandlers = {
 export type DictationControl = { stop: () => void };
 
 /**
+ * Ask the OS/browser for microphone permission once, up-front. Resolves true
+ * if the user grants access (or had already granted it), false if they denied
+ * or no mic is available. Releases the stream immediately so the indicator
+ * doesn't stay on until the recogniser starts.
+ */
+export async function ensureMicPermission(): Promise<boolean> {
+	if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+		return true;
+	}
+	try {
+		const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+		stream.getTracks().forEach((t) => t.stop());
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Stream German speech-to-text into handlers. Call returned `stop()` when done.
  * Uses restart-on-end while active so pauses do not kill a long answer (Chrome quirk).
  */
@@ -152,9 +171,10 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 			notifyStopped();
 			return;
 		}
-		// Chrome can fire `onend` after silence even with continuous=true. Restart on
-		// a tiny delay so the audio pipeline fully releases before re-arming.
-		restartTimer = setTimeout(tryStart, 120);
+		// Chrome/iOS can fire `onend` after every utterance even with continuous=true.
+		// Restart on a small delay so the audio pipeline fully releases before re-arming
+		// (also keeps mobile from churning the mic on every short pause).
+		restartTimer = setTimeout(tryStart, 250);
 	};
 
 	try {

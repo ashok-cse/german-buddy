@@ -19,6 +19,7 @@
 	import {
 		startGermanDictation,
 		getSpeechRecognitionCtor,
+		ensureMicPermission,
 		type DictationControl
 	} from '$lib/speech-recognition';
 	import { speak, speakGerman } from '$lib/german-tts';
@@ -83,6 +84,8 @@
 	let chatScenarioId = $state<string>(CONVERSATION_SCENARIOS[0].id);
 	let chatStyle = $state<ConversationStyle>('roleplay');
 	let chatLastTarget = $state<string | null>(null);
+	let micPermissionAsked = $state(false);
+	let lastUserUtterance = '';
 	const currentScenario = $derived(getScenarioById(chatScenarioId) ?? CONVERSATION_SCENARIOS[0]);
 
 	const GERMAN_RATE_BY_LEVEL: Record<GermanLevel, number> = {
@@ -179,10 +182,17 @@
 		}
 	}
 
-	function startSpeaking(): void {
+	async function startSpeaking(): Promise<void> {
 		if (listening || !speechSupported) return;
 		errorMessage = null;
 		liveTranscript = '';
+		const ok = await ensureMicPermission();
+		micPermissionAsked = true;
+		if (!ok) {
+			errorMessage =
+				'Microphone access was blocked. Allow the mic for this site in your browser settings, then tap Start again.';
+			return;
+		}
 		dictation = startGermanDictation({
 			onFinal: (text) => {
 				const base = answer.trimEnd();
@@ -280,8 +290,15 @@
 
 	async function startChatSession(): Promise<void> {
 		if (chatSessionActive) return;
-		chatSessionActive = true;
 		chatError = null;
+		const ok = await ensureMicPermission();
+		micPermissionAsked = true;
+		if (!ok) {
+			chatError =
+				'Microphone access was blocked. Allow the mic for this site in your browser settings, then tap Start conversation again.';
+			return;
+		}
+		chatSessionActive = true;
 		chatLastCorrection = null;
 		chatLastCorrections = [];
 		chatLastExplanation = null;
@@ -291,6 +308,7 @@
 		chatBuffer = '';
 		chatLiveTranscript = '';
 		lastAssistantText = '';
+		lastUserUtterance = '';
 		await fetchAssistantTurn([]);
 	}
 
@@ -351,7 +369,7 @@
 				if (!trimmed) return;
 				if (looksLikeEchoOfAssistant(trimmed)) return;
 				chatEchoGuardUntil = 0;
-				chatLiveTranscript = trimmed;
+				if (trimmed !== chatLiveTranscript) chatLiveTranscript = trimmed;
 				scheduleAutoSubmit();
 			},
 			onError: (msg) => {
@@ -440,6 +458,12 @@
 			if (chatSessionActive) beginListening();
 			return;
 		}
+		// Drop duplicate captures (mic restart re-emitting same final, or echo of previous turn).
+		if (normalizeForEcho(text) === lastUserUtterance) {
+			if (chatSessionActive && speechSupported) scheduleResumeListening();
+			return;
+		}
+		lastUserUtterance = normalizeForEcho(text);
 		const next = [...chatMessages, { role: 'user', content: text } satisfies ConversationMessage];
 		chatMessages = next;
 		chatLastCorrection = null;
@@ -840,7 +864,7 @@
 					<p class="text-xs text-stone-500">
 						Hands-free 1:1 practice. Pick a level + scenario, tap <span class="font-medium text-stone-700"
 							>Start conversation</span
-						>, then just speak.
+						>, allow the mic when prompted, then just speak.
 					</p>
 				</div>
 				<div class="flex flex-wrap gap-2">
