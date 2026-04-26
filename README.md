@@ -42,8 +42,9 @@ cp .env.example .env
 | `LLM_BASE_URL` | No | API root (default: `https://api.groq.com/openai/v1`) |
 | `LLM_MODEL` | No | Model id (default: `llama-3.3-70b-versatile`; try `llama-3.1-8b-instant`, `openai/gpt-oss-120b`, …) |
 | `LLM_JSON_OBJECT` | No | `true` / `false` — request JSON-object mode (default: `true`) |
-| `APP_USERNAME` | **Yes** | HTTP Basic auth username for `/app`, `/dashboard`, `/api/correct`, `/api/converse`. Required to access the practice app. |
-| `APP_PASSWORD` | **Yes** | HTTP Basic auth password (paired with `APP_USERNAME`). Required to access the practice app. |
+| `APP_USERNAME` | **Yes** | Login username for `/app`, `/dashboard`, `/api/correct`, `/api/converse`. Required to access the practice app. |
+| `APP_PASSWORD` | **Yes** | Login password (paired with `APP_USERNAME`). Required to access the practice app. |
+| `WAITLIST_FILE` | No | Path to the JSONL waitlist log. Default: `./data/waitlist.jsonl` locally, `/app/data/waitlist.jsonl` in the Docker image. |
 
 The server calls `POST {LLM_BASE_URL}/chat/completions` with an OpenAI-compatible payload. Set `LLM_BASE_URL` + `LLM_MODEL` to swap to OpenAI or any other compatible provider. Discover Groq model ids with `GET https://api.groq.com/openai/v1/models` or the [Groq models docs](https://console.groq.com/docs/models).
 
@@ -79,7 +80,17 @@ Multi-stage `Dockerfile` (`@sveltejs/adapter-node`): the image runs `node build`
 3. Expose **port 3000** to the internet (or set `PORT` to match the port you publish).
 4. If links or cookies misbehave behind your reverse proxy, set **`ORIGIN`** to your public site URL (e.g. `https://germanbuddy.ai`) — see the [SvelteKit adapter-node docs](https://svelte.dev/docs/kit/adapter-node#Environment-variables).
 
-The waitlist endpoint persists signups to `./data/waitlist.jsonl`. Mount a volume at `/app/data` if you want them to survive container restarts.
+### Persisting waitlist signups
+
+The image creates an empty `/app/data/waitlist.jsonl` (writable by the non-root runtime user) and declares `/app/data` as a Docker `VOLUME`. Without a mount, every container redeploy in EasyPanel **wipes the file**.
+
+To keep signups, in EasyPanel → your app → **Mounts** tab:
+
+- Mount type: **Volume** (or **Bind**)
+- Container path: `/app/data`
+- Name / host path: anything you like (e.g. `germanbuddy-waitlist`)
+
+After deploying, the file will be available at `/app/data/waitlist.jsonl` inside the container — view or replace it from the EasyPanel **Files** tab. The path is also configurable via the `WAITLIST_FILE` env var if you'd rather mount the volume somewhere else.
 
 ## Routes
 
