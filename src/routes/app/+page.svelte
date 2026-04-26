@@ -22,7 +22,7 @@
 		ensureMicPermission,
 		type DictationControl
 	} from '$lib/speech-recognition';
-	import { speak, speakGerman } from '$lib/german-tts';
+	import { primeTts, speak, speakGerman } from '$lib/german-tts';
 	import {
 		CONVERSATION_SCENARIOS,
 		CONVERSATION_STYLES,
@@ -186,6 +186,7 @@
 		if (listening || !speechSupported) return;
 		errorMessage = null;
 		liveTranscript = '';
+		primeTts();
 		const ok = await ensureMicPermission();
 		micPermissionAsked = true;
 		if (!ok) {
@@ -291,6 +292,8 @@
 	async function startChatSession(): Promise<void> {
 		if (chatSessionActive) return;
 		chatError = null;
+		// iOS WebKit requires TTS to be unlocked during the tap, before any await.
+		primeTts();
 		const ok = await ensureMicPermission();
 		micPermissionAsked = true;
 		if (!ok) {

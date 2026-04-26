@@ -20,6 +20,28 @@ function pickGermanVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice |
 	return [...de].sort((a, b) => scoreGermanVoice(b) - scoreGermanVoice(a))[0];
 }
 
+/**
+ * iOS (Safari + Chrome on iOS, all WebKit) only allows `speechSynthesis.speak`
+ * if it has already been triggered inside a user gesture. After an `await`
+ * (e.g. fetch, getUserMedia) the gesture context is lost and later speak()
+ * calls are silently dropped. Call this synchronously inside a click/tap
+ * handler to unlock the engine for the rest of the session.
+ */
+export function primeTts(): void {
+	if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+	try {
+		const synth = window.speechSynthesis;
+		// Resume in case the engine is paused (some iOS states).
+		if (typeof synth.resume === 'function') synth.resume();
+		const u = new SpeechSynthesisUtterance(' ');
+		u.volume = 0;
+		u.rate = 1;
+		synth.speak(u);
+	} catch {
+		/* ignore */
+	}
+}
+
 export type SpeakOptions = {
 	/** Fires once speech finishes (or fails to start). Always called exactly once. */
 	onEnd?: () => void;
