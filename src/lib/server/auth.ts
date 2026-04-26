@@ -5,6 +5,18 @@ import { env } from '$env/dynamic/private';
 export const SESSION_COOKIE = 'gb_session';
 
 /**
+ * Read the configured username/password from env, trimming surrounding
+ * whitespace (a common `.env` paper-cut: `APP_USERNAME= ashok` keeps the
+ * leading space and silently breaks every login attempt).
+ */
+function readCreds(): { username: string; password: string } | null {
+	const u = (env.APP_USERNAME ?? '').trim();
+	const p = (env.APP_PASSWORD ?? '').trim();
+	if (!u || !p) return null;
+	return { username: u, password: p };
+}
+
+/**
  * Derive the canonical session token from the configured username/password.
  * The cookie value is just this HMAC digest — it never contains the credentials
  * themselves, and rotating either env var instantly invalidates all sessions.
@@ -12,10 +24,9 @@ export const SESSION_COOKIE = 'gb_session';
  * Returns `null` when env is not configured, so callers can short-circuit.
  */
 export function expectedSessionToken(): string | null {
-	const u = env.APP_USERNAME;
-	const p = env.APP_PASSWORD;
-	if (!u || !p) return null;
-	return createHmac('sha256', `${u}:${p}`).update('gb-auth:v1').digest('hex');
+	const c = readCreds();
+	if (!c) return null;
+	return createHmac('sha256', `${c.username}:${c.password}`).update('gb-auth:v1').digest('hex');
 }
 
 /** Constant-time comparison of two strings of arbitrary length. */
@@ -39,13 +50,12 @@ export function isAuthenticated(token: string | undefined | null): boolean {
  * Both fields are length-checked first and then compared in constant time.
  */
 export function credsMatch(username: string, password: string): boolean {
-	const u = env.APP_USERNAME;
-	const p = env.APP_PASSWORD;
-	if (!u || !p) return false;
-	return safeEqualStrings(username, u) && safeEqualStrings(password, p);
+	const c = readCreds();
+	if (!c) return false;
+	return safeEqualStrings(username, c.username) && safeEqualStrings(password, c.password);
 }
 
 /** Whether the server is configured for auth at all. */
 export function authConfigured(): boolean {
-	return Boolean(env.APP_USERNAME && env.APP_PASSWORD);
+	return readCreds() !== null;
 }
