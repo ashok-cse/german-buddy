@@ -580,8 +580,18 @@
 	class="mx-auto flex min-h-dvh max-w-3xl flex-col gap-8 px-4 py-10 pb-16 text-stone-800 sm:px-6"
 >
 	<header class="space-y-2">
-		<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Day-one practice</p>
-		<h1 class="text-3xl font-semibold tracking-tight text-stone-900 sm:text-4xl">German Mirror</h1>
+		<div class="flex items-start justify-between gap-4">
+			<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Day-one practice</p>
+			<form method="POST" action="/logout" class="shrink-0">
+				<button
+					type="submit"
+					class="text-xs font-medium text-stone-500 hover:text-stone-900 transition-colors"
+				>
+					Sign out
+				</button>
+			</form>
+		</div>
+		<h1 class="text-3xl font-semibold tracking-tight text-stone-900 sm:text-4xl">German Buddy</h1>
 		<p class="max-w-2xl text-base leading-relaxed text-stone-600">
 			Pick a topic, then answer in German — by typing or by speaking — and get corrections. Numbers and alphabet
 			include an optional example line you can hear for pronunciation.

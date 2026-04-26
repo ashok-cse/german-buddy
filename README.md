@@ -42,8 +42,8 @@ cp .env.example .env
 | `LLM_BASE_URL` | No | API root (default: `https://api.groq.com/openai/v1`) |
 | `LLM_MODEL` | No | Model id (default: `llama-3.3-70b-versatile`; try `llama-3.1-8b-instant`, `openai/gpt-oss-120b`, …) |
 | `LLM_JSON_OBJECT` | No | `true` / `false` — request JSON-object mode (default: `true`) |
-| `APP_USERNAME` | No | HTTP Basic auth username for `/app`, `/dashboard`, `/api/correct`, `/api/converse`. Leave empty to keep the app open. |
-| `APP_PASSWORD` | No | HTTP Basic auth password (paired with `APP_USERNAME`). Both must be set to enable protection. |
+| `APP_USERNAME` | **Yes** | HTTP Basic auth username for `/app`, `/dashboard`, `/api/correct`, `/api/converse`. Required to access the practice app. |
+| `APP_PASSWORD` | **Yes** | HTTP Basic auth password (paired with `APP_USERNAME`). Required to access the practice app. |
 
 The server calls `POST {LLM_BASE_URL}/chat/completions` with an OpenAI-compatible payload. Set `LLM_BASE_URL` + `LLM_MODEL` to swap to OpenAI or any other compatible provider. Discover Groq model ids with `GET https://api.groq.com/openai/v1/models` or the [Groq models docs](https://console.groq.com/docs/models).
 
@@ -86,17 +86,29 @@ The waitlist endpoint persists signups to `./data/waitlist.jsonl`. Mount a volum
 | Route | Purpose | Auth |
 |-------|---------|------|
 | `/` | Landing page — branding + waitlist signup | public |
-| `/app` | Practice app (write / speak / chat) | Basic auth |
-| `/dashboard` | 302 redirect → `/app` | Basic auth |
-| `POST /api/correct` | `{ prompt, answer }` → `{ original, corrected, natural, english, tip }` | Basic auth |
-| `POST /api/converse` | `{ messages, level, scenario, style }` → assistant reply + word-level corrections + pronunciation | Basic auth |
+| `/login` | Username + password sign-in form | public |
+| `/logout` | Clears the session cookie, redirects to `/` | public |
+| `/app` | Practice app (write / speak / chat) | session |
+| `/dashboard` | 302 redirect → `/app` | session |
+| `POST /api/correct` | `{ prompt, answer }` → `{ original, corrected, natural, english, tip }` | session |
+| `POST /api/converse` | `{ messages, level, scenario, style }` → assistant reply + word-level corrections + pronunciation | session |
 | `POST /api/waitlist` | `{ email }` → appends to `data/waitlist.jsonl` and logs (best-effort) | public |
 
-Auth is enforced by `src/hooks.server.ts` via the **`APP_USERNAME`** / **`APP_PASSWORD`** env vars. If either is empty, the protected routes stay open and a one-time warning is logged — useful for local dev. Once you set both in production, the browser shows the standard Basic-auth prompt the first time someone hits `/app`, and the protected APIs reuse the same cached credentials automatically (same-origin `fetch` defaults).
+### Auth flow
+
+- `/login` posts `username` + `password` to a SvelteKit **form action** that runs entirely server-side (`src/routes/login/+page.server.ts`). Credentials are compared in **constant time** against `APP_USERNAME` / `APP_PASSWORD` from `$env/dynamic/private` — the env values never reach the browser.
+- On success the server sets an **httpOnly, sameSite=lax, secure-in-prod** cookie (`gb_session`) whose value is the HMAC-SHA256 of `${APP_USERNAME}:${APP_PASSWORD}` keyed against a fixed string. The cookie is just a fingerprint — it can't be reversed into the credentials, and rotating either env var instantly invalidates every existing session.
+- `src/hooks.server.ts` validates that cookie on every request to a protected route. Failures redirect navigations to `/login?next=…` and return `401 JSON` to API callers.
+- `/logout` clears the cookie and bounces back to `/`. There is a small "Sign out" button at the top of `/app`.
+
+Both `APP_USERNAME` and `APP_PASSWORD` are required — if either is empty, the protected routes always block (one-time `console.error` flags the misconfiguration).
 
 ## Architecture
 
-- **`src/hooks.server.ts`** — HTTP Basic auth gate for `/app`, `/dashboard`, `/api/correct`, `/api/converse`. Reads `APP_USERNAME` / `APP_PASSWORD` from env at runtime; no-op when either is empty.
+- **`src/hooks.server.ts`** — session-cookie gate for `/app`, `/dashboard`, `/api/correct`, `/api/converse`. Redirects unauthenticated navigations to `/login?next=…` and returns `401 JSON` to API callers.
+- **`src/lib/server/auth.ts`** — server-only auth helpers: `expectedSessionToken`, `isAuthenticated`, `credsMatch`. Uses `node:crypto` for HMAC + `timingSafeEqual`. Reads env via `$env/dynamic/private`.
+- **`src/routes/login/`** — username/password form (`+page.svelte`) + server action (`+page.server.ts`) that validates credentials and sets the `gb_session` cookie.
+- **`src/routes/logout/+server.ts`** — clears the session cookie and redirects to `/`.
 - **`src/routes/+page.svelte`** — marketing landing page + waitlist form.
 - **`src/routes/app/+page.svelte`** — practice app UI: write / speak / chat modes, TTS (`speechSynthesis` for `de-DE` + `en-*`), dictation, feedback cards, history.
 - **`src/routes/api/{correct,converse,waitlist}/+server.ts`** — POST endpoints.
