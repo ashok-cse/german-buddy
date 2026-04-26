@@ -37,14 +37,8 @@
 </svelte:head>
 
 <div class="min-h-dvh flex flex-col">
-	<header class="px-6 sm:px-10 py-6">
-		<a href="/" aria-label="German Buddy" class="inline-flex">
-			<img src="/logo.svg" alt="" aria-hidden="true" class="h-8 w-8" />
-		</a>
-	</header>
-
 	<main class="flex-1 px-6 sm:px-10">
-		<section class="max-w-2xl mx-auto pt-8 sm:pt-12 pb-16 text-center">
+		<section class="max-w-2xl mx-auto pt-16 sm:pt-24 pb-16 text-center">
 			<img
 				src="/logo.svg"
 				alt="German Buddy"
