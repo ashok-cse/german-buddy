@@ -353,10 +353,18 @@
 	function beginListening(): void {
 		if (!chatSessionActive || !speechSupported) return;
 		stopChatDictation();
-		chatBuffer = '';
+		// NOTE: don't reset chatBuffer here. A mic hiccup (e.g. the user taps the
+		// screen on Android) ends the recogniser mid-sentence; we restart it via
+		// scheduleResumeListening and want to keep what the user already said so
+		// nothing is lost. chatBuffer is reset by submitUserTurn / startChatSession
+		// when a new turn legitimately begins.
 		chatLiveTranscript = '';
 		chatPhase = 'listening';
 		chatEchoGuardUntil = Date.now() + CHAT_ECHO_WINDOW_MS;
+		// If we're resuming with text already captured, arm the silence timer so
+		// the user's existing utterance still gets submitted even if they don't
+		// keep talking after the hiccup.
+		if (chatBuffer.trim()) scheduleAutoSubmit();
 		chatDictation = startGermanDictation({
 			onFinal: (text) => {
 				const t = text.trim();
@@ -899,14 +907,17 @@
 				<div class="space-y-1.5">
 					<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Mode</p>
 					<div
-						class="flex max-w-md rounded-xl border border-stone-200 bg-stone-100/90 p-1 shadow-inner"
+						class="flex max-w-md rounded-xl border border-stone-200 bg-stone-100/90 p-1 shadow-inner {chatSessionActive
+							? 'opacity-60'
+							: ''}"
 						role="group"
 						aria-label="Conversation style"
 					>
 						{#each CONVERSATION_STYLES as st (st)}
 							<button
 								type="button"
-								class="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 {chatStyle ===
+								disabled={chatSessionActive}
+								class="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 disabled:cursor-not-allowed {chatStyle ===
 								st
 									? 'bg-white text-stone-900 shadow-sm'
 									: 'text-stone-600 hover:text-stone-900'}"
@@ -922,14 +933,17 @@
 				<div class="space-y-1.5">
 					<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Level</p>
 					<div
-						class="flex max-w-md rounded-xl border border-stone-200 bg-stone-100/90 p-1 shadow-inner"
+						class="flex max-w-md rounded-xl border border-stone-200 bg-stone-100/90 p-1 shadow-inner {chatSessionActive
+							? 'opacity-60'
+							: ''}"
 						role="group"
 						aria-label="German level"
 					>
 						{#each GERMAN_LEVELS as lvl (lvl)}
 							<button
 								type="button"
-								class="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 {chatLevel ===
+								disabled={chatSessionActive}
+								class="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 disabled:cursor-not-allowed {chatLevel ===
 								lvl
 									? 'bg-white text-stone-900 shadow-sm'
 									: 'text-stone-600 hover:text-stone-900'}"
@@ -949,11 +963,16 @@
 
 				<div class="space-y-1.5">
 					<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Scenario</p>
-					<div class="flex flex-wrap gap-1.5" role="group" aria-label="Conversation scenario">
+					<div
+						class="flex flex-wrap gap-1.5 {chatSessionActive ? 'opacity-60' : ''}"
+						role="group"
+						aria-label="Conversation scenario"
+					>
 						{#each CONVERSATION_SCENARIOS as s (s.id)}
 							<button
 								type="button"
-								class="rounded-lg border px-2.5 py-1.5 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 {chatScenarioId ===
+								disabled={chatSessionActive}
+								class="rounded-lg border px-2.5 py-1.5 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 disabled:cursor-not-allowed {chatScenarioId ===
 								s.id
 									? 'border-stone-900 bg-stone-900 text-white'
 									: 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50'}"
@@ -964,6 +983,11 @@
 						{/each}
 					</div>
 					<p class="text-xs leading-relaxed text-stone-500">{currentScenario.setup}</p>
+					{#if chatSessionActive}
+						<p class="text-[11px] leading-relaxed text-stone-400">
+							Tap <span class="font-medium text-stone-500">End conversation</span> to change mode, level or scenario.
+						</p>
+					{/if}
 				</div>
 			</div>
 

@@ -97,18 +97,28 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 		}
 	};
 
+	// Per-session counter of how many results we've already finalised. Android
+	// Chrome sometimes re-fires older finals (and resets `event.resultIndex` to
+	// 0), which previously caused the same words to be appended repeatedly
+	// (e.g. "das das Wetter das Wetter ..."). Tracking the count lets us only
+	// emit each final exactly once per session.
+	let processedFinalCount = 0;
+
 	rec.onresult = (event: SpeechRecognitionEvent) => {
 		let interim = '';
 		let finalChunk = '';
-		for (let i = event.resultIndex; i < event.results.length; i++) {
+		let nextFinalCount = processedFinalCount;
+		for (let i = 0; i < event.results.length; i++) {
 			const r = event.results[i];
 			const piece = r[0]?.transcript ?? '';
 			if (r.isFinal) {
-				finalChunk += piece;
+				if (i >= processedFinalCount) finalChunk += piece;
+				nextFinalCount = i + 1;
 			} else {
 				interim += piece;
 			}
 		}
+		processedFinalCount = nextFinalCount;
 		const trimmedFinal = finalChunk.trim();
 		if (trimmedFinal) handlers.onFinal(trimmedFinal);
 		handlers.onInterim(interim.trim());
@@ -146,6 +156,7 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 			return;
 		}
 		try {
+			processedFinalCount = 0;
 			rec.start();
 			restartAttempts = 0;
 		} catch (err) {
@@ -178,6 +189,7 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 	};
 
 	try {
+		processedFinalCount = 0;
 		rec.start();
 		handlers.onReady?.();
 	} catch (err) {
