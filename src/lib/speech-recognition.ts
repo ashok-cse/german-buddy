@@ -32,9 +32,24 @@ export type DictationHandlers = {
 	onStopped: () => void;
 	/** Called after the mic session successfully starts (not called on immediate failure). */
 	onReady?: () => void;
+	/** Called when audible speech is first detected by the local VAD. */
+	onSpeechStart?: () => void;
+	/** Called after sustained silence following speech (VAD-detected end of utterance). */
+	onSpeechEnd?: () => void;
+	/** Called once if calibration finds the ambient noise floor too high to recognise speech reliably. */
+	onNoisyEnvironment?: () => void;
 };
 
 export type DictationControl = { stop: () => void };
+
+/** Constraints we want any time we open the mic — most browsers default to these,
+ *  but stating them explicitly is necessary on older Safari and on Chromium-based
+ *  embedded webviews where defaults can be off. */
+const MIC_CONSTRAINTS: MediaTrackConstraints = {
+	noiseSuppression: true,
+	echoCancellation: true,
+	autoGainControl: true
+};
 
 /**
  * Ask the OS/browser for microphone permission once, up-front. Resolves true
@@ -47,12 +62,131 @@ export async function ensureMicPermission(): Promise<boolean> {
 		return true;
 	}
 	try {
-		const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+		const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
 		stream.getTracks().forEach((t) => t.stop());
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+type VadHandlers = Pick<DictationHandlers, 'onSpeechStart' | 'onSpeechEnd' | 'onNoisyEnvironment'>;
+
+/** Lightweight Voice Activity Detector running on a parallel mic stream.
+ *  Used to (a) reset auto-submit timers while the user is actively speaking
+ *  even if the speech recogniser produces no transcripts (typical in noisy
+ *  rooms), (b) submit promptly when the user truly stops, (c) warn the user
+ *  if the ambient noise floor is too high for reliable recognition. */
+async function startVad(handlers: VadHandlers): Promise<{ stop: () => void } | null> {
+	if (typeof window === 'undefined' || typeof navigator === 'undefined') return null;
+	if (!navigator.mediaDevices?.getUserMedia) return null;
+	const w = window as Window & { webkitAudioContext?: typeof AudioContext };
+	const AudioCtx = w.AudioContext ?? w.webkitAudioContext;
+	if (!AudioCtx) return null;
+
+	let stream: MediaStream;
+	try {
+		stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
+	} catch {
+		return null;
+	}
+
+	let ctx: AudioContext;
+	try {
+		ctx = new AudioCtx();
+	} catch {
+		stream.getTracks().forEach((t) => t.stop());
+		return null;
+	}
+
+	const source = ctx.createMediaStreamSource(stream);
+	const analyser = ctx.createAnalyser();
+	analyser.fftSize = 1024;
+	source.connect(analyser);
+	const buf = new Uint8Array(analyser.fftSize);
+
+	let stopped = false;
+	let calibrating = true;
+	const calibration: number[] = [];
+	let speechMin = 0.012;
+	let aboveFrames = 0;
+	let belowFrames = 0;
+	let speaking = false;
+	let noisyEmitted = false;
+	let firstSeenAt = 0;
+
+	// ~60fps → ~3 frames ≈ 50ms to start, ~70 frames ≈ 1.2s to end an utterance.
+	// 1.2s is long enough to absorb natural mid-sentence pauses but short enough
+	// to feel responsive once the user stops.
+	const ABOVE_FRAMES_TO_START = 3;
+	const BELOW_FRAMES_TO_END = 70;
+	const CALIBRATION_MS = 400;
+
+	const tick = () => {
+		if (stopped) return;
+		analyser.getByteTimeDomainData(buf);
+		let sumSq = 0;
+		for (let i = 0; i < buf.length; i++) {
+			const x = (buf[i] - 128) / 128;
+			sumSq += x * x;
+		}
+		const rms = Math.sqrt(sumSq / buf.length);
+
+		const now = performance.now();
+		if (firstSeenAt === 0) firstSeenAt = now;
+
+		if (calibrating) {
+			calibration.push(rms);
+			if (now - firstSeenAt > CALIBRATION_MS) {
+				calibrating = false;
+				const sorted = [...calibration].sort((a, b) => a - b);
+				const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+				speechMin = Math.max(median * 2.5, 0.012);
+				if (median > 0.04 && !noisyEmitted) {
+					noisyEmitted = true;
+					handlers.onNoisyEnvironment?.();
+				}
+			}
+		} else if (rms > speechMin) {
+			belowFrames = 0;
+			aboveFrames++;
+			if (!speaking && aboveFrames >= ABOVE_FRAMES_TO_START) {
+				speaking = true;
+				handlers.onSpeechStart?.();
+			}
+		} else {
+			aboveFrames = 0;
+			if (speaking) {
+				belowFrames++;
+				if (belowFrames >= BELOW_FRAMES_TO_END) {
+					speaking = false;
+					belowFrames = 0;
+					handlers.onSpeechEnd?.();
+				}
+			}
+		}
+		requestAnimationFrame(tick);
+	};
+	requestAnimationFrame(tick);
+
+	return {
+		stop: () => {
+			if (stopped) return;
+			stopped = true;
+			try {
+				source.disconnect();
+			} catch {
+				/* ignore */
+			}
+			try {
+				analyser.disconnect();
+			} catch {
+				/* ignore */
+			}
+			void ctx.close().catch(() => {});
+			stream.getTracks().forEach((t) => t.stop());
+		}
+	};
 }
 
 /**
@@ -71,11 +205,36 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 
 	let active = true;
 	let stoppedNotified = false;
+	let vadCtl: { stop: () => void } | null = null;
+	const disposeVad = () => {
+		vadCtl?.stop();
+		vadCtl = null;
+	};
 	const notifyStopped = () => {
 		if (stoppedNotified) return;
 		stoppedNotified = true;
+		disposeVad();
 		handlers.onStopped();
 	};
+
+	const wantVad = !!(
+		handlers.onSpeechStart ||
+		handlers.onSpeechEnd ||
+		handlers.onNoisyEnvironment
+	);
+	if (wantVad) {
+		void startVad(handlers)
+			.then((c) => {
+				if (!active || stoppedNotified) {
+					c?.stop();
+					return;
+				}
+				vadCtl = c;
+			})
+			.catch(() => {
+				/* VAD is best-effort; recogniser still works without it. */
+			});
+	}
 
 	const rec = new Ctor();
 	rec.lang = 'de-DE';
@@ -200,6 +359,7 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 				stop: () => {
 					active = false;
 					clearRestartTimer();
+					disposeVad();
 					try {
 						rec.stop();
 					} catch {
@@ -218,6 +378,7 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 		stop: () => {
 			active = false;
 			clearRestartTimer();
+			disposeVad();
 			try {
 				rec.stop();
 			} catch {
