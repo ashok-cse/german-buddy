@@ -6,7 +6,7 @@ import { SESSION_COOKIE, authConfigured, isAuthenticated } from '$lib/server/aut
  * `/api/waitlist` stay public; everything else (the practice app and the
  * LLM-backed APIs it calls) requires a valid session cookie set by `/login`.
  */
-const PROTECTED_PREFIXES = ['/app', '/dashboard', '/api/correct', '/api/converse'];
+const PROTECTED_PREFIXES = ['/app', '/dashboard', '/api/correct', '/api/converse', '/api/tts'];
 
 function isProtected(pathname: string): boolean {
 	return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
