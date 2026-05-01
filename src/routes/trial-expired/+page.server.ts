@@ -4,7 +4,6 @@ import {
 	pocketbaseConfigured,
 	getPocketBaseAdmin,
 	getPeoplesByEmail,
-	ensurePeoplesForOAuthUser,
 	isTrialActive
 } from '$lib/server/pocketbase';
 
@@ -18,14 +17,8 @@ export const load: PageServerLoad = async (event) => {
 	}
 	try {
 		const pb = await getPocketBaseAdmin();
-		let record = await getPeoplesByEmail(pb, session.user.email);
-		if (!record) {
-			record = await ensurePeoplesForOAuthUser(pb, {
-				email: session.user.email,
-				name: session.user.name
-			});
-		}
-		if (isTrialActive(record)) {
+		const record = await getPeoplesByEmail(pb, session.user.email);
+		if (record && isTrialActive(record)) {
 			throw redirect(303, '/app');
 		}
 	} catch (e) {

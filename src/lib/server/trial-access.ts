@@ -1,37 +1,51 @@
+import { env } from '$env/dynamic/private';
 import {
 	pocketbaseConfigured,
 	getPocketBaseAdmin,
 	getPeoplesByEmail,
-	ensurePeoplesForOAuthUser,
 	isTrialActive
 } from '$lib/server/pocketbase';
 
-export type TrialGateResult =
-	| { allowed: true }
-	| { allowed: false; reason: 'no_email' | 'trial_ended' };
+export type TrialDenyReason =
+	| 'no_email'
+	| 'trial_ended'
+	| 'no_profile'
+	| 'pb_unavailable'
+	| 'pb_not_configured';
+
+export type TrialGateResult = { allowed: true } | { allowed: false; reason: TrialDenyReason };
+
+/** When true (set in production), trial-gated routes deny access if PocketBase env is missing. */
+export function pocketbaseRequiredForTrial(): boolean {
+	return (env.POCKETBASE_REQUIRED ?? '').trim().toLowerCase() === 'true';
+}
 
 /**
- * Trial gate for /app and LLM-backed APIs. When PocketBase is not configured, allows access (local dev).
- * On PocketBase errors, allows access and logs so outages do not hard-lock the product.
+ * Trial gate for /app and LLM-backed APIs.
+ * - Fail-closed on PocketBase errors when PB is configured.
+ * - Does **not** create `peoples` rows (avoids trial reset / duplicate trials); creation stays in OAuth `signIn` only.
+ * - If `POCKETBASE_REQUIRED=true` and env is incomplete → deny (`pb_not_configured`).
+ * - If PocketBase is optional (dev) and not configured → allow without trial metadata.
  */
 export async function checkTrialAccessForUser(options: {
 	email: string | null | undefined;
-	name?: string | null;
 }): Promise<TrialGateResult> {
 	if (!options.email?.trim()) {
 		return { allowed: false, reason: 'no_email' };
 	}
+
 	if (!pocketbaseConfigured()) {
+		if (pocketbaseRequiredForTrial()) {
+			return { allowed: false, reason: 'pb_not_configured' };
+		}
 		return { allowed: true };
 	}
+
 	try {
 		const pb = await getPocketBaseAdmin();
-		let record = await getPeoplesByEmail(pb, options.email);
+		const record = await getPeoplesByEmail(pb, options.email);
 		if (!record) {
-			record = await ensurePeoplesForOAuthUser(pb, {
-				email: options.email,
-				name: options.name
-			});
+			return { allowed: false, reason: 'no_profile' };
 		}
 		if (isTrialActive(record)) {
 			return { allowed: true };
@@ -39,7 +53,7 @@ export async function checkTrialAccessForUser(options: {
 		return { allowed: false, reason: 'trial_ended' };
 	} catch (err) {
 		console.error('[trial] PocketBase access check failed', err);
-		return { allowed: true };
+		return { allowed: false, reason: 'pb_unavailable' };
 	}
 }
 
