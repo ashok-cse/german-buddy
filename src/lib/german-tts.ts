@@ -1,17 +1,10 @@
 /** Slightly slower than default (1) for learner-friendly pacing. */
 const GERMAN_TTS_RATE = 0.84;
-const GERMAN_TTS_PITCH = 1;
 
 /** 46-byte silent WAV used to unlock <audio> playback on iOS in `primeTts`. */
 const SILENT_WAV_DATA_URL =
 	'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
 
-/** If Piper fails, skip it for this long before retrying — avoids hammering when offline. */
-const PIPER_COOLDOWN_MS = 30_000;
-
-type PiperState = 'unknown' | 'ok' | 'unavailable';
-let piperState: PiperState = 'unknown';
-let piperRetryAfter = 0;
 /** Reference to the currently-playing Piper <audio> so a new speak call can interrupt it. */
 let currentAudio: HTMLAudioElement | null = null;
 
@@ -25,24 +18,6 @@ function clearPiperPrefetch(): void {
 	prefetchAbort = null;
 	prefetchPromise = null;
 	prefetchText = '';
-}
-
-function scoreGermanVoice(v: SpeechSynthesisVoice): number {
-	let s = 0;
-	const lang = v.lang.toLowerCase().replace('_', '-');
-	if (lang === 'de-de') s += 12;
-	else if (lang.startsWith('de')) s += 6;
-	const n = v.name.toLowerCase();
-	if (n.includes('premium') || n.includes('enhanced') || n.includes('neural')) s += 10;
-	if (n.includes('google') || n.includes('microsoft') || n.includes('apple')) s += 4;
-	if (v.localService) s += 2;
-	return s;
-}
-
-function pickGermanVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
-	const de = voices.filter((v) => v.lang.toLowerCase().startsWith('de'));
-	if (de.length === 0) return undefined;
-	return [...de].sort((a, b) => scoreGermanVoice(b) - scoreGermanVoice(a))[0];
 }
 
 /**
@@ -84,6 +59,11 @@ export type SpeakOptions = {
 	onEnd?: () => void;
 	/** Override speech rate. Browsers clamp to ~0.1–10. Default depends on language. */
 	rate?: number;
+	/**
+	 * When several `en-*` system voices exist, bias toward male-presenting ones
+	 * (best-effort name heuristics) so tutor English aligns with Piper Thorsten.
+	 */
+	preferMale?: boolean;
 };
 
 function clampRate(r: number): number {
@@ -91,9 +71,63 @@ function clampRate(r: number): number {
 	return Math.min(2, Math.max(0.4, r));
 }
 
+/** Best-effort gender bias from voice names — Web Speech API has no gender field. */
+function englishMaleVoiceBias(name: string): number {
+	const n = name.toLowerCase();
+	let s = 0;
+	const male = [
+		'male',
+		'(male)',
+		'daniel',
+		'david',
+		'fred',
+		'microsoft mark',
+		'microsoft david',
+		'tom ',
+		'arthur',
+		'ralph',
+		'bruce',
+		'aaron',
+		'gordon',
+		'nick ',
+		'google us english male',
+		'uk english male',
+		'english male'
+	];
+	const female = [
+		'female',
+		'zira',
+		'samantha',
+		'karen',
+		'victoria',
+		'moira',
+		'fiona',
+		'tessa',
+		'aria',
+		'ivy',
+		'joanna',
+		'susan',
+		'linda',
+		'hazel',
+		'heather',
+		'sonia',
+		'martha',
+		'sarah',
+		'anna',
+		'melissa',
+		'allison',
+		'google uk english female',
+		'google us english female'
+	];
+	for (const h of male) if (n.includes(h)) s += 28;
+	for (const h of female) if (n.includes(h)) s -= 45;
+	return s;
+}
+
 function pickVoiceForLang(
 	voices: SpeechSynthesisVoice[],
-	lang: string
+	lang: string,
+	options?: Pick<SpeakOptions, 'preferMale'>
 ): SpeechSynthesisVoice | undefined {
 	const tag = lang.toLowerCase();
 	const prefix = tag.split('-')[0];
@@ -102,10 +136,12 @@ function pickVoiceForLang(
 		return l === tag || l.startsWith(`${prefix}-`) || l === prefix;
 	});
 	if (candidates.length === 0) return undefined;
+	const wantMaleEn = !!options?.preferMale && prefix === 'en';
 	return [...candidates].sort((a, b) => {
 		const score = (v: SpeechSynthesisVoice): number => {
 			let s = 0;
 			const n = v.name.toLowerCase();
+			if (wantMaleEn) s += englishMaleVoiceBias(v.name);
 			if (n.includes('premium') || n.includes('enhanced') || n.includes('neural')) s += 10;
 			if (n.includes('google') || n.includes('microsoft') || n.includes('apple')) s += 4;
 			if (v.localService) s += 2;
@@ -115,7 +151,6 @@ function pickVoiceForLang(
 	})[0];
 }
 
-/** Generic TTS: pick the best available voice for `lang` and speak `text`. */
 export function speak(text: string, lang: string, opts?: SpeakOptions): void {
 	if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
 		opts?.onEnd?.();
@@ -136,7 +171,9 @@ export function speak(text: string, lang: string, opts?: SpeakOptions): void {
 		u.rate = clampRate(opts?.rate ?? defaultRate);
 		u.pitch = 1;
 		u.volume = 1;
-		const voice = pickVoiceForLang(synth.getVoices(), lang);
+		const voice = pickVoiceForLang(synth.getVoices(), lang, {
+			preferMale: opts?.preferMale
+		});
 		if (voice) u.voice = voice;
 		let done = false;
 		const finish = () => {
@@ -167,25 +204,6 @@ export function speak(text: string, lang: string, opts?: SpeakOptions): void {
 	const fallbackId = window.setTimeout(runOnce, 400);
 }
 
-function speakWithVoices(synth: SpeechSynthesis, text: string, opts?: SpeakOptions): void {
-	const u = new SpeechSynthesisUtterance(text);
-	u.lang = 'de-DE';
-	u.rate = clampRate(opts?.rate ?? GERMAN_TTS_RATE);
-	u.pitch = GERMAN_TTS_PITCH;
-	u.volume = 1;
-	const voice = pickGermanVoice(synth.getVoices());
-	if (voice) u.voice = voice;
-	let done = false;
-	const finish = () => {
-		if (done) return;
-		done = true;
-		opts?.onEnd?.();
-	};
-	u.onend = finish;
-	u.onerror = finish;
-	synth.speak(u);
-}
-
 function stopCurrentAudio(): void {
 	const a = currentAudio;
 	currentAudio = null;
@@ -202,17 +220,6 @@ function stopCurrentAudio(): void {
 	}
 }
 
-function shouldTryPiper(): boolean {
-	if (piperState === 'ok') return true;
-	if (piperState === 'unavailable') return Date.now() >= piperRetryAfter;
-	return true;
-}
-
-function markPiperUnavailable(): void {
-	piperState = 'unavailable';
-	piperRetryAfter = Date.now() + PIPER_COOLDOWN_MS;
-}
-
 /**
  * Start loading Piper WAV for `text` before `speakGerman` — e.g. when `/api/converse`
  * returns so synthesis runs in parallel with English tutor speech.
@@ -220,7 +227,7 @@ function markPiperUnavailable(): void {
 export function prefetchGermanTts(text: string): void {
 	if (typeof window === 'undefined') return;
 	const trimmed = text.trim();
-	if (!trimmed || !shouldTryPiper()) return;
+	if (!trimmed) return;
 
 	clearPiperPrefetch();
 	const ac = new AbortController();
@@ -243,9 +250,7 @@ export function prefetchGermanTts(text: string): void {
 
 /**
  * Synthesize via the server-side Piper proxy and play through `<audio>`.
- * Resolves on natural end / playback error. Rejects only when synthesis
- * itself failed (network / non-2xx / play() blocked) so the caller can fall
- * back to browser TTS without firing `onEnd` twice.
+ * Rejects when fetch or playback cannot start — caller must invoke `onEnd` once.
  */
 async function speakWithPiper(text: string, opts?: SpeakOptions): Promise<void> {
 	const trimmed = text.trim();
@@ -277,8 +282,6 @@ async function speakWithPiper(text: string, opts?: SpeakOptions): Promise<void> 
 
 	const url = URL.createObjectURL(blob);
 	const audio = new Audio(url);
-	// Modern browsers default `preservesPitch` to true, but be explicit so
-	// learner-rate playback (e.g. 0.84x) doesn't drop pitch on older WebKit.
 	audio.preservesPitch = true;
 	audio.playbackRate = clampRate(opts?.rate ?? GERMAN_TTS_RATE);
 
@@ -295,70 +298,30 @@ async function speakWithPiper(text: string, opts?: SpeakOptions): Promise<void> 
 		opts?.onEnd?.();
 	};
 
-	// Register handlers BEFORE play() so a fast-fire `ended`/`error` (or any
-	// browser state quirk) can't slip through the gap and leave the caller
-	// waiting forever.
 	audio.onended = finish;
 	audio.onerror = finish;
 
 	try {
 		await audio.play();
-	} catch (e) {
-		// play() rejected (e.g. iOS gesture lost). Tear down without firing
-		// onEnd — the caller will fall back to browser TTS and that path will
-		// fire onEnd exactly once.
+	} catch {
 		audio.onended = null;
 		audio.onerror = null;
 		URL.revokeObjectURL(url);
-		throw e;
+		throw new Error('audio play blocked');
 	}
 
-	piperState = 'ok';
 	currentAudio = audio;
 
-	// Belt-and-suspenders watchdog: HTMLAudioElement is supposed to fire
-	// `ended` reliably, but in the wild we've seen browsers occasionally
-	// silently stall (decoding glitch, blob revoked early, OS audio hiccup).
-	// Without this, the conversation page would wait on `onEnd` forever.
 	const expectedSec = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 8;
 	const rate = audio.playbackRate || 1;
 	const watchdogMs = Math.ceil((expectedSec / rate) * 1000) + 1500;
 	watchdog = setTimeout(finish, watchdogMs);
 }
 
-function speakGermanBrowser(text: string, opts?: SpeakOptions): void {
-	if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-		opts?.onEnd?.();
-		return;
-	}
-	const synth = window.speechSynthesis;
-	synth.cancel();
-
-	const run = () => speakWithVoices(synth, text, opts);
-
-	if (synth.getVoices().length > 0) {
-		run();
-		return;
-	}
-
-	let started = false;
-	const runOnce = () => {
-		if (started) return;
-		started = true;
-		synth.removeEventListener('voiceschanged', onVoices);
-		window.clearTimeout(fallbackId);
-		run();
-	};
-	const onVoices = () => runOnce();
-	synth.addEventListener('voiceschanged', onVoices);
-	const fallbackId = window.setTimeout(runOnce, 400);
-}
-
 /**
- * Read German text aloud. Uses server-side Piper (Thorsten) for high-quality
- * neural German pronunciation; falls back transparently to the browser's
- * `SpeechSynthesis` if Piper is unreachable. Pass `onEnd` to be notified when
- * speech finishes (e.g. to resume mic in a conversation).
+ * German TTS via Piper only (`/api/tts`). No browser `SpeechSynthesis` fallback;
+ * if Piper or `<audio>` fails, `onEnd` still runs once so callers (e.g. mic)
+ * never hang.
  */
 export function speakGerman(text: string, opts?: SpeakOptions): void {
 	if (typeof window === 'undefined') {
@@ -378,21 +341,14 @@ export function speakGerman(text: string, opts?: SpeakOptions): void {
 	if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 	stopCurrentAudio();
 
-	if (!shouldTryPiper()) {
-		speakGermanBrowser(trimmed, opts);
-		return;
-	}
-
 	void speakWithPiper(trimmed, opts).catch(() => {
-		markPiperUnavailable();
-		speakGermanBrowser(trimmed, opts);
+		opts?.onEnd?.();
 	});
 }
 
 /**
- * Cancel any in-flight German TTS — both the browser `SpeechSynthesis` queue
- * and any Piper `<audio>` currently playing. Does NOT fire `onEnd`; callers
- * are responsible for resetting their own state if they invoke this mid-speak.
+ * Cancel Piper `<audio>` and any in-flight prefetch. Does NOT fire `onEnd`.
+ * Still clears browser speech synthesis queue (used for English tutor lines).
  */
 export function stopGermanTts(): void {
 	if (typeof window === 'undefined') return;

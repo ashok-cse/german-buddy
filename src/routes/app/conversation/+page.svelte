@@ -299,7 +299,11 @@
 				else onAllDone();
 			};
 			if (englishOrGerman)
-				speak(englishOrGerman, 'en-US', { rate: chatEnglishRate, onEnd: playGerman });
+				speak(englishOrGerman, 'en-US', {
+					rate: chatEnglishRate,
+					preferMale: true,
+					onEnd: playGerman
+				});
 			else playGerman();
 		} else {
 			speakGerman(englishOrGerman, { rate: chatGermanRate, onEnd: onAllDone });
