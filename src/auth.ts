@@ -22,6 +22,30 @@ export const { handle, signIn, signOut } = SvelteKitAuth(async () => {
 		providers: g ? [g] : [],
 		// Fallback avoids crashes during local partial setup; replace with a real secret via AUTH_SECRET.
 		secret: secret || 'dev-placeholder-auth-secret-min-32-characters!',
-		trustHost: true
+		trustHost: true,
+		events: {
+			async signIn({ user }) {
+				const email = user.email?.trim();
+				if (!email) return;
+
+				const {
+					pocketbaseConfigured,
+					getPocketBaseAdmin,
+					ensurePeoplesForOAuthUser
+				} = await import('$lib/server/pocketbase');
+
+				if (!pocketbaseConfigured()) {
+					console.warn('[pocketbase] peoples sync skipped (missing POCKETBASE_* env)');
+					return;
+				}
+
+				try {
+					const pb = await getPocketBaseAdmin();
+					await ensurePeoplesForOAuthUser(pb, { email, name: user.name });
+				} catch (err) {
+					console.error('[pocketbase] peoples sync failed', err);
+				}
+			}
+		}
 	};
 });
