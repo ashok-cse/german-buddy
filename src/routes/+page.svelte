@@ -42,10 +42,10 @@
 </script>
 
 <svelte:head>
-	<title>German Buddy — your friendly companion for everyday German</title>
+	<title>German Buddy — now in beta</title>
 	<meta
 		name="description"
-		content="German Buddy helps you practice everyday German by writing, speaking, and chatting with an AI buddy. Sign in with Google or join the waitlist at germanbuddy.ai."
+		content="German Buddy is in open beta. Log in with Google to practice everyday German by writing, speaking, and chatting — free for early users at germanbuddy.ai."
 	/>
 </svelte:head>
 
@@ -62,7 +62,7 @@
 				class="mt-8 inline-flex items-center gap-2 rounded-full bg-stone-200/70 px-3 py-1 text-xs font-medium text-stone-600"
 			>
 				<span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-				Sign in with Google · germanbuddy.ai
+				Open beta · Log in and start practicing
 			</span>
 
 			<h1
@@ -72,8 +72,9 @@
 			</h1>
 
 			<p class="mt-6 text-lg text-stone-600 leading-relaxed">
-				Write, speak, and chat your way to fluency. German Buddy gives you small,
-				real-life prompts and gentle corrections — so daily practice actually sticks.
+				<strong class="font-medium text-stone-800">We’re in beta</strong> — log in with Google to use
+				the full app. Write, speak, and chat with small real-life prompts and gentle corrections, free
+				for early users while we improve things.
 			</p>
 
 			{#if session?.user}
@@ -86,7 +87,7 @@
 						onclick={openApp}
 						class="rounded-full bg-stone-900 px-6 py-3 text-sm font-medium text-stone-50 hover:bg-stone-800 transition-colors"
 					>
-						Open the app
+						Go to practice
 					</button>
 				</div>
 			{:else}
@@ -114,17 +115,20 @@
 								d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
 							/>
 						</svg>
-						Continue with Google
+						Log in with Google
 					</button>
 					<p class="text-xs text-stone-500">
-						Already invited? <a href="/login" class="font-medium text-stone-700 hover:underline">Sign in here</a>
+						<a href="/login" class="font-medium text-stone-700 hover:underline">Sign in</a>
+						if you were redirected here from the app.
 					</p>
 				</div>
 			{/if}
 
-			<div class="mt-14 border-t border-stone-200 pt-12">
-				<p class="text-sm font-medium text-stone-700">Or join the waitlist</p>
-				<p class="mt-1 text-sm text-stone-500">We’ll email you when we open wider access.</p>
+			<div class="mt-14 border-t border-stone-200 pt-10">
+				<p class="text-sm font-medium text-stone-700">Updates by email</p>
+				<p class="mt-1 text-sm text-stone-500">
+					Beta is open above — add your email if you only want occasional news.
+				</p>
 
 				<form
 					onsubmit={joinWaitlist}
@@ -152,7 +156,7 @@
 						{:else if submitting}
 							Joining…
 						{:else}
-							Join waitlist
+							Subscribe
 						{/if}
 					</button>
 				</form>
@@ -160,13 +164,9 @@
 				{#if errorMessage}
 					<p class="mt-3 text-sm text-red-600">{errorMessage}</p>
 				{:else if submitted}
-					<p class="mt-3 text-sm text-stone-600">
-						Danke! We'll send you a note the moment German Buddy is ready.
-					</p>
+					<p class="mt-3 text-sm text-stone-600">Danke! We’ll keep you posted.</p>
 				{:else}
-					<p class="mt-3 text-sm text-stone-500">
-						No spam. Just a single email when we launch.
-					</p>
+					<p class="mt-3 text-sm text-stone-500">Low volume. Unsubscribe anytime.</p>
 				{/if}
 			</div>
 		</section>
