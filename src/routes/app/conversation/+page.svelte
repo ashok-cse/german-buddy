@@ -7,7 +7,7 @@
 		ensureMicPermission,
 		type DictationControl
 	} from '$lib/speech-recognition';
-	import { primeTts, speak, speakGerman } from '$lib/german-tts';
+	import { primeTts, prefetchGermanTts, speak, speakGerman, stopGermanTts } from '$lib/german-tts';
 	import {
 		CONVERSATION_SCENARIOS,
 		CONVERSATION_STYLES,
@@ -41,17 +41,13 @@
 	let chatPhase = $state<ChatPhase>('idle');
 	let chatLiveTranscript = $state('');
 	let chatBuffer = $state('');
-	let chatNoiseHint = $state<string | null>(null);
 	let chatDictation: DictationControl | null = null;
 	let chatSilenceTimer: ReturnType<typeof setTimeout> | null = null;
 	let chatRestartTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastAssistantText = '';
 	let chatEchoGuardUntil = 0;
-	let chatVadSpeaking = false;
-	// Bumped from 1500ms: with the recogniser's own ~700ms finalise window, the
-	// effective pause budget was only ~2s, which kept splitting longer answers
-	// in two. 2500ms gives ~3s of natural pause before auto-submit.
-	const CHAT_SILENCE_MS = 2500;
+	// Pauses between clauses are longer in learner German than in casual EN speech.
+	const CHAT_SILENCE_MS = 3200;
 	const CHAT_RESUME_DELAY_MS = 900;
 	const CHAT_ECHO_WINDOW_MS = 1500;
 
@@ -153,9 +149,7 @@
 	}
 
 	function cancelTts(): void {
-		if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-			window.speechSynthesis.cancel();
-		}
+		stopGermanTts();
 	}
 
 	async function startChatSession(): Promise<void> {
@@ -177,7 +171,6 @@
 		chatMessages = [];
 		chatBuffer = '';
 		chatLiveTranscript = '';
-		chatNoiseHint = null;
 		lastAssistantText = '';
 		lastUserUtterance = '';
 		await fetchAssistantTurn([]);
@@ -187,7 +180,6 @@
 		chatSessionActive = false;
 		chatPhase = 'idle';
 		chatBuffer = '';
-		chatNoiseHint = null;
 		lastAssistantText = '';
 		stopChatDictation();
 		cancelTts();
@@ -225,7 +217,6 @@
 		chatLiveTranscript = '';
 		chatPhase = 'listening';
 		chatEchoGuardUntil = Date.now() + CHAT_ECHO_WINDOW_MS;
-		chatVadSpeaking = false;
 		if (chatBuffer.trim()) scheduleAutoSubmit();
 		chatDictation = startGermanDictation({
 			onFinal: (text) => {
@@ -235,7 +226,7 @@
 				chatEchoGuardUntil = 0;
 				chatBuffer = chatBuffer ? `${chatBuffer} ${t}` : t;
 				chatLiveTranscript = '';
-				if (!chatVadSpeaking) scheduleAutoSubmit();
+				scheduleAutoSubmit();
 			},
 			onInterim: (t) => {
 				const trimmed = t.trim();
@@ -243,7 +234,7 @@
 				if (looksLikeEchoOfAssistant(trimmed)) return;
 				chatEchoGuardUntil = 0;
 				if (trimmed !== chatLiveTranscript) chatLiveTranscript = trimmed;
-				if (!chatVadSpeaking) scheduleAutoSubmit();
+				scheduleAutoSubmit();
 			},
 			onError: (msg) => {
 				chatError = msg;
@@ -251,7 +242,6 @@
 			onStopped: () => {
 				chatDictation = null;
 				chatLiveTranscript = '';
-				chatVadSpeaking = false;
 				if (
 					chatSessionActive &&
 					!chatError &&
@@ -261,29 +251,6 @@
 				) {
 					scheduleResumeListening();
 				}
-			},
-			// VAD bridges the gap when the recogniser is silent in noisy rooms:
-			// hold the auto-submit timer while the user is clearly still talking,
-			// then submit promptly once they actually stop.
-			onSpeechStart: () => {
-				chatVadSpeaking = true;
-				chatNoiseHint = null;
-				clearChatSilenceTimer();
-			},
-			onSpeechEnd: () => {
-				chatVadSpeaking = false;
-				if (chatBuffer.trim() || chatLiveTranscript.trim()) {
-					// Brief delay lets a trailing final transcript land before submit.
-					clearChatSilenceTimer();
-					chatSilenceTimer = setTimeout(() => {
-						chatSilenceTimer = null;
-						void submitUserTurn();
-					}, 350);
-				}
-			},
-			onNoisyEnvironment: () => {
-				chatNoiseHint =
-					'Background noise is high — try a quieter spot or move closer to the mic.';
 			}
 		});
 	}
@@ -393,11 +360,17 @@
 				return;
 			}
 			const data = (await res.json()) as ConversationTurnResult;
-			const assistantText = (data?.assistant ?? '').trim();
 			const germanTarget =
 				typeof data?.germanTarget === 'string' && data.germanTarget.trim()
 					? data.germanTarget.trim()
 					: '';
+			const assistantText = (data?.assistant ?? '').trim();
+
+			const piperLine = chatStyle === 'tutor' ? germanTarget : assistantText;
+			if (chatSessionActive && ttsSupported && piperLine.trim()) {
+				prefetchGermanTts(piperLine.trim());
+			}
+
 			chatLastCorrection =
 				typeof data?.correctedUser === 'string' && data.correctedUser.trim()
 					? data.correctedUser.trim()
@@ -439,7 +412,15 @@
 					...history,
 					{ role: 'assistant', content: transcriptForChat || germanTarget }
 				];
-				lastAssistantText = `${assistantText} ${germanTarget}`.trim();
+				// Echo guard target: in tutor mode the user is *expected* to repeat
+				// the German target back, so excluding it lets their first interim
+				// land instead of being silently dropped as "looks like the bot's
+				// own voice". In roleplay the assistant's own German is what we
+				// want to suppress (speaker bleed), so include it.
+				lastAssistantText =
+					chatStyle === 'tutor'
+						? assistantText.trim()
+						: `${assistantText} ${germanTarget}`.trim();
 				if (chatSessionActive && ttsSupported) {
 					chatPhase = 'speaking';
 					playAssistantTurn(assistantText, germanTarget);
@@ -788,14 +769,6 @@
 						</div>
 					{/if}
 				</div>
-			{/if}
-
-			{#if chatNoiseHint}
-				<p
-					class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-				>
-					{chatNoiseHint}
-				</p>
 			{/if}
 
 			{#if chatError}

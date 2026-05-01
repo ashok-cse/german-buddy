@@ -15,6 +15,18 @@ let piperRetryAfter = 0;
 /** Reference to the currently-playing Piper <audio> so a new speak call can interrupt it. */
 let currentAudio: HTMLAudioElement | null = null;
 
+/** Warm `/api/tts` fetch started right after converse JSON — overlaps English TTS + UI. */
+let prefetchAbort: AbortController | null = null;
+let prefetchPromise: Promise<Blob> | null = null;
+let prefetchText = '';
+
+function clearPiperPrefetch(): void {
+	prefetchAbort?.abort();
+	prefetchAbort = null;
+	prefetchPromise = null;
+	prefetchText = '';
+}
+
 function scoreGermanVoice(v: SpeechSynthesisVoice): number {
 	let s = 0;
 	const lang = v.lang.toLowerCase().replace('_', '-');
@@ -202,21 +214,66 @@ function markPiperUnavailable(): void {
 }
 
 /**
+ * Start loading Piper WAV for `text` before `speakGerman` — e.g. when `/api/converse`
+ * returns so synthesis runs in parallel with English tutor speech.
+ */
+export function prefetchGermanTts(text: string): void {
+	if (typeof window === 'undefined') return;
+	const trimmed = text.trim();
+	if (!trimmed || !shouldTryPiper()) return;
+
+	clearPiperPrefetch();
+	const ac = new AbortController();
+	prefetchAbort = ac;
+	prefetchText = trimmed;
+	prefetchPromise = (async (): Promise<Blob> => {
+		const res = await fetch('/api/tts', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text: trimmed }),
+			cache: 'no-store',
+			signal: ac.signal
+		});
+		if (!res.ok) throw new Error(`tts ${res.status}`);
+		const blob = await res.blob();
+		if (blob.size === 0) throw new Error('tts empty');
+		return blob;
+	})();
+}
+
+/**
  * Synthesize via the server-side Piper proxy and play through `<audio>`.
  * Resolves on natural end / playback error. Rejects only when synthesis
  * itself failed (network / non-2xx / play() blocked) so the caller can fall
  * back to browser TTS without firing `onEnd` twice.
  */
 async function speakWithPiper(text: string, opts?: SpeakOptions): Promise<void> {
-	const res = await fetch('/api/tts', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ text }),
-		cache: 'no-store'
-	});
-	if (!res.ok) throw new Error(`tts ${res.status}`);
-	const blob = await res.blob();
-	if (blob.size === 0) throw new Error('tts empty');
+	const trimmed = text.trim();
+	let blob: Blob | undefined;
+
+	if (prefetchText === trimmed && prefetchPromise) {
+		const p = prefetchPromise;
+		prefetchText = '';
+		prefetchPromise = null;
+		prefetchAbort = null;
+		try {
+			blob = await p;
+		} catch {
+			blob = undefined;
+		}
+	}
+
+	if (!blob || blob.size === 0) {
+		const res = await fetch('/api/tts', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text: trimmed }),
+			cache: 'no-store'
+		});
+		if (!res.ok) throw new Error(`tts ${res.status}`);
+		blob = await res.blob();
+		if (blob.size === 0) throw new Error('tts empty');
+	}
 
 	const url = URL.createObjectURL(blob);
 	const audio = new Audio(url);
@@ -225,27 +282,48 @@ async function speakWithPiper(text: string, opts?: SpeakOptions): Promise<void> 
 	audio.preservesPitch = true;
 	audio.playbackRate = clampRate(opts?.rate ?? GERMAN_TTS_RATE);
 
-	try {
-		await audio.play();
-	} catch (e) {
-		URL.revokeObjectURL(url);
-		throw e;
-	}
-
-	piperState = 'ok';
-	currentAudio = audio;
 	let done = false;
+	let watchdog: ReturnType<typeof setTimeout> | null = null;
 	const finish = () => {
 		if (done) return;
 		done = true;
+		if (watchdog !== null) clearTimeout(watchdog);
 		if (currentAudio === audio) currentAudio = null;
 		audio.onended = null;
 		audio.onerror = null;
 		URL.revokeObjectURL(url);
 		opts?.onEnd?.();
 	};
+
+	// Register handlers BEFORE play() so a fast-fire `ended`/`error` (or any
+	// browser state quirk) can't slip through the gap and leave the caller
+	// waiting forever.
 	audio.onended = finish;
 	audio.onerror = finish;
+
+	try {
+		await audio.play();
+	} catch (e) {
+		// play() rejected (e.g. iOS gesture lost). Tear down without firing
+		// onEnd — the caller will fall back to browser TTS and that path will
+		// fire onEnd exactly once.
+		audio.onended = null;
+		audio.onerror = null;
+		URL.revokeObjectURL(url);
+		throw e;
+	}
+
+	piperState = 'ok';
+	currentAudio = audio;
+
+	// Belt-and-suspenders watchdog: HTMLAudioElement is supposed to fire
+	// `ended` reliably, but in the wild we've seen browsers occasionally
+	// silently stall (decoding glitch, blob revoked early, OS audio hiccup).
+	// Without this, the conversation page would wait on `onEnd` forever.
+	const expectedSec = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 8;
+	const rate = audio.playbackRate || 1;
+	const watchdogMs = Math.ceil((expectedSec / rate) * 1000) + 1500;
+	watchdog = setTimeout(finish, watchdogMs);
 }
 
 function speakGermanBrowser(text: string, opts?: SpeakOptions): void {
@@ -293,6 +371,10 @@ export function speakGerman(text: string, opts?: SpeakOptions): void {
 		return;
 	}
 
+	if (prefetchText && prefetchText !== trimmed) {
+		clearPiperPrefetch();
+	}
+
 	if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 	stopCurrentAudio();
 
@@ -305,4 +387,22 @@ export function speakGerman(text: string, opts?: SpeakOptions): void {
 		markPiperUnavailable();
 		speakGermanBrowser(trimmed, opts);
 	});
+}
+
+/**
+ * Cancel any in-flight German TTS — both the browser `SpeechSynthesis` queue
+ * and any Piper `<audio>` currently playing. Does NOT fire `onEnd`; callers
+ * are responsible for resetting their own state if they invoke this mid-speak.
+ */
+export function stopGermanTts(): void {
+	if (typeof window === 'undefined') return;
+	if ('speechSynthesis' in window) {
+		try {
+			window.speechSynthesis.cancel();
+		} catch {
+			/* ignore */
+		}
+	}
+	stopCurrentAudio();
+	clearPiperPrefetch();
 }

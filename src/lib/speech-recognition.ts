@@ -5,6 +5,8 @@ type WebSpeechRecognition = {
 	lang: string;
 	continuous: boolean;
 	interimResults: boolean;
+	/** Chromium: request multiple ASR hypotheses; we pick highest confidence. */
+	maxAlternatives?: number;
 	start(): void;
 	stop(): void;
 	onresult: ((this: WebSpeechRecognition, ev: SpeechRecognitionEvent) => void) | null;
@@ -115,11 +117,11 @@ async function startVad(handlers: VadHandlers): Promise<{ stop: () => void } | n
 	let noisyEmitted = false;
 	let firstSeenAt = 0;
 
-	// ~60fps → ~3 frames ≈ 50ms to start, ~70 frames ≈ 1.2s to end an utterance.
-	// 1.2s is long enough to absorb natural mid-sentence pauses but short enough
-	// to feel responsive once the user stops.
+	// ~60fps → ~3 frames ≈ 50ms to start. German learners pause mid-clause longer
+	// than EN speakers — ~110 frames ≈ 1.85s below threshold before we declare
+	// “speech ended” (when parallel VAD is enabled).
 	const ABOVE_FRAMES_TO_START = 3;
-	const BELOW_FRAMES_TO_END = 70;
+	const BELOW_FRAMES_TO_END = 110;
 	const CALIBRATION_MS = 400;
 
 	const tick = () => {
@@ -189,11 +191,46 @@ async function startVad(handlers: VadHandlers): Promise<{ stop: () => void } | n
 	};
 }
 
+function pickBestTranscript(result: SpeechRecognitionResult): string {
+	let best = '';
+	let bestScore = -Infinity;
+	for (let j = 0; j < result.length; j++) {
+		const alt = result[j];
+		const raw = alt.transcript ?? '';
+		const t = raw.trim();
+		if (!t) continue;
+		const conf =
+			typeof alt.confidence === 'number' && Number.isFinite(alt.confidence) ? alt.confidence : 0;
+		const score = conf + t.length * 1e-6;
+		if (score > bestScore) {
+			bestScore = score;
+			best = raw;
+		}
+	}
+	if (best.trim()) return best.trim();
+	return (result[0]?.transcript ?? '').trim();
+}
+
+export type GermanDictationOptions = {
+	/** BCP 47 tag; default `de-DE`. */
+	lang?: string;
+	/**
+	 * Runs a lightweight RMS-based VAD on a second mic capture so timers survive
+	 * rooms where the cloud recogniser emits sparse transcripts. Some setups see
+	 * worse accuracy when two captures are open — disable if German STT feels off.
+	 * Default true when any VAD handler is passed.
+	 */
+	enableParallelVad?: boolean;
+};
+
 /**
  * Stream German speech-to-text into handlers. Call returned `stop()` when done.
  * Uses restart-on-end while active so pauses do not kill a long answer (Chrome quirk).
  */
-export function startGermanDictation(handlers: DictationHandlers): DictationControl {
+export function startGermanDictation(
+	handlers: DictationHandlers,
+	options?: GermanDictationOptions
+): DictationControl {
 	const Ctor = getSpeechRecognitionCtor();
 	if (!Ctor) {
 		handlers.onError(
@@ -217,11 +254,12 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 		handlers.onStopped();
 	};
 
-	const wantVad = !!(
+	const vadWanted = !!(
 		handlers.onSpeechStart ||
 		handlers.onSpeechEnd ||
 		handlers.onNoisyEnvironment
 	);
+	const wantVad = vadWanted && options?.enableParallelVad !== false;
 	if (wantVad) {
 		void startVad(handlers)
 			.then((c) => {
@@ -237,9 +275,14 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 	}
 
 	const rec = new Ctor();
-	rec.lang = 'de-DE';
+	rec.lang = options?.lang?.trim() || 'de-DE';
 	rec.continuous = true;
 	rec.interimResults = true;
+	try {
+		rec.maxAlternatives = 5;
+	} catch {
+		/* older engines omit this property */
+	}
 
 	const humanError = (code: string): string => {
 		switch (code) {
@@ -256,28 +299,20 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 		}
 	};
 
-	// Per-session counter of how many results we've already finalised. Android
-	// Chrome sometimes re-fires older finals (and resets `event.resultIndex` to
-	// 0), which previously caused the same words to be appended repeatedly
-	// (e.g. "das das Wetter das Wetter ..."). Tracking the count lets us only
-	// emit each final exactly once per session.
-	let processedFinalCount = 0;
-
 	rec.onresult = (event: SpeechRecognitionEvent) => {
+		const ri = typeof event.resultIndex === 'number' ? event.resultIndex : 0;
 		let interim = '';
 		let finalChunk = '';
-		let nextFinalCount = processedFinalCount;
-		for (let i = 0; i < event.results.length; i++) {
+		for (let i = ri; i < event.results.length; i++) {
 			const r = event.results[i];
-			const piece = r[0]?.transcript ?? '';
+			const piece = pickBestTranscript(r);
+			if (!piece) continue;
 			if (r.isFinal) {
-				if (i >= processedFinalCount) finalChunk += piece;
-				nextFinalCount = i + 1;
+				finalChunk = finalChunk ? `${finalChunk} ${piece}` : piece;
 			} else {
-				interim += piece;
+				interim = interim ? `${interim} ${piece}` : piece;
 			}
 		}
-		processedFinalCount = nextFinalCount;
 		const trimmedFinal = finalChunk.trim();
 		if (trimmedFinal) handlers.onFinal(trimmedFinal);
 		handlers.onInterim(interim.trim());
@@ -315,7 +350,6 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 			return;
 		}
 		try {
-			processedFinalCount = 0;
 			rec.start();
 			restartAttempts = 0;
 		} catch (err) {
@@ -348,7 +382,6 @@ export function startGermanDictation(handlers: DictationHandlers): DictationCont
 	};
 
 	try {
-		processedFinalCount = 0;
 		rec.start();
 		handlers.onReady?.();
 	} catch (err) {
