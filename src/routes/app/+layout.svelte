@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { signOut } from '@auth/sveltekit/client';
 
 	let { children } = $props();
 
@@ -25,14 +26,13 @@
 				<img src="/logo.svg" alt="" aria-hidden="true" class="h-7 w-7" />
 				<span class="text-sm font-semibold tracking-tight text-stone-900">German Buddy</span>
 			</a>
-			<form method="POST" action="/logout">
-				<button
-					type="submit"
-					class="text-xs font-medium text-stone-500 transition-colors hover:text-stone-900"
-				>
-					Sign out
-				</button>
-			</form>
+			<button
+				type="button"
+				class="text-xs font-medium text-stone-500 transition-colors hover:text-stone-900"
+				onclick={() => signOut({ redirectTo: '/' })}
+			>
+				Sign out
+			</button>
 		</div>
 		<nav class="mx-auto w-full max-w-3xl px-4 py-3 sm:px-6" aria-label="Practice mode">
 			<div

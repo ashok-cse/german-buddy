@@ -1,10 +1,11 @@
 import type { Handle } from '@sveltejs/kit';
-import { SESSION_COOKIE, authConfigured, isAuthenticated } from '$lib/server/auth';
+import { sequence } from '@sveltejs/kit/hooks';
+import { handle as authenticationHandle } from './auth';
+import { authConfigured } from '$lib/server/auth';
 
 /**
- * Routes behind login. The landing page (`/`), the login/logout endpoints, and
- * `/api/waitlist` stay public; everything else (the practice app and the
- * LLM-backed APIs it calls) requires a valid session cookie set by `/login`.
+ * Routes behind login. The landing page (`/`), auth routes (`/auth/*`), login/logout,
+ * and `/api/waitlist` stay public; the practice app and LLM-backed APIs require a session.
  */
 const PROTECTED_PREFIXES = ['/app', '/dashboard', '/api/correct', '/api/converse', '/api/tts'];
 
@@ -14,22 +15,21 @@ function isProtected(pathname: string): boolean {
 
 let warnedUnconfigured = false;
 
-export const handle: Handle = async ({ event, resolve }) => {
+const authorizationHandle: Handle = async ({ event, resolve }) => {
 	if (!isProtected(event.url.pathname)) return resolve(event);
 
 	if (!authConfigured()) {
 		if (!warnedUnconfigured) {
 			console.error(
-				'[auth] APP_USERNAME / APP_PASSWORD are not set — protected routes are blocked. Set both in .env to grant access.'
+				'[auth] Set AUTH_SECRET (32+ chars), PUBLIC_GOOGLE_CLIENT_ID, and GOOGLE_CLIENT_SECRET — protected routes stay blocked until then.'
 			);
 			warnedUnconfigured = true;
 		}
 	}
 
-	const token = event.cookies.get(SESSION_COOKIE);
-	if (isAuthenticated(token)) return resolve(event);
+	const session = await event.locals.auth();
+	if (session?.user) return resolve(event);
 
-	// API consumers expect JSON, not an HTML redirect.
 	if (event.url.pathname.startsWith('/api/')) {
 		return new Response(JSON.stringify({ message: 'Unauthorized' }), {
 			status: 401,
@@ -43,3 +43,5 @@ export const handle: Handle = async ({ event, resolve }) => {
 		headers: { Location: `/login?next=${encodeURIComponent(next)}` }
 	});
 };
+
+export const handle = sequence(authenticationHandle, authorizationHandle);
