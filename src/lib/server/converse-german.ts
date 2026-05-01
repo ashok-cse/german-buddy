@@ -8,7 +8,8 @@ import type {
 } from '$lib/conversation';
 
 const LEVEL_GUIDE: Record<GermanLevel, string> = {
-	A1: 'Use very simple A1 German: short sentences, present tense, basic everyday vocabulary. Avoid complex grammar.',
+	A1:
+		'Use very easy A1 German: 3–8 word phrases when possible, present tense only, subject–verb–object order, only the most common beginner vocabulary (greetings, classroom words, simple requests). Prefer wording without ä, ö, ü when an equally natural simple alternative exists — beginners struggle with those sounds and speech recognition often misses them; only use umlauts when unavoidable for standard German (then keep the phrase very short). Whenever germanTarget contains ä, ö, or ü, set "pronunciation" with clear ASCII respelling for those words. Avoid long compounds and idioms.',
 	A2: 'Use simple A2 German: short clear sentences, basic past tense, everyday vocabulary, gentle helpful tone.',
 	B1: 'Use B1 German: connected sentences, common past/future tenses, opinions and reasons. Keep it natural but accessible.',
 	B2: 'Use B2 German: fluent everyday speech with subordinate clauses and richer vocabulary, but stay clear.'
@@ -31,7 +32,7 @@ Behaviour:
   * If the user's last German message has any clear mistake (grammar, word choice, missing article, wrong gender, wrong verb form, etc.), set "correctedUser" to the corrected German sentence (keep the user's intended meaning).
   * Set "corrections" to a short array of pinpointed word fixes — one entry per wrong WORD only. Each entry must be {"wrong": "<exact wrong word/token from the user>", "right": "<corrected word>", "note": "<≤12 word English hint, optional>"}. Keep tokens minimal: a single word like "schon" → "schön", or "der" → "die". Do NOT put whole phrases or sentences here. Omit "corrections" entirely when the issue is structural (word order, missing word) or when there is no mistake.
   * Set "explanation" to a short, friendly ENGLISH explanation (1–2 sentences) of WHAT was wrong and the rule, like a teacher would say. If the user's German was perfect, you may omit "correctedUser" and "corrections" and use "explanation" as one short praise/tip in English.
-  * Set "pronunciation" to a simple ASCII pronunciation guide for the corrected German sentence (or for tricky words), e.g. "Ich hätte gern → ish HET-tuh gairn". Use plain letters, hyphens for syllables, CAPS for stress. Skip if the sentence is trivially easy.
+  * Set "pronunciation" to a simple ASCII pronunciation guide for the corrected German sentence (or for tricky words), e.g. "Ich hätte gern → ish HET-tuh gairn". Use plain letters, hyphens for syllables, CAPS for stress. At A1: required whenever the learner should practice ä, ö, or ü; skip only when there are no umlauts and the sentence is trivially easy.
 - Keep every value short and clear. No markdown, no lists, no emojis.
 
 Output: return ONLY valid JSON with these keys:
@@ -63,7 +64,7 @@ Behaviour:
 - If the learner made a mistake, set "correctedUser" to the corrected German version of THEIR last sentence (often equal to germanTarget).
 - Set "corrections" to a short array of pinpointed word fixes — one entry per wrong WORD only. Each entry must be {"wrong": "<exact wrong word/token from the learner>", "right": "<corrected word>", "note": "<≤12 word English hint, optional>"}. Keep tokens minimal: a single word like "schon" → "schön", or "ich gehe" → "ich bin gegangen" (max 2 words). Do NOT put full sentences here. Omit "corrections" when the fix is structural (word order, missing word) or when the learner was correct.
 - "explanation" (optional) is a short ENGLISH explanation of the rule or the fix — only when useful, max 1–2 sentences.
-- "pronunciation" (optional) is a simple ASCII guide for "germanTarget" (e.g. "ish HET-tuh gairn dee SHPYE-zuh-kar-tuh"). Use hyphens for syllables, CAPS for stress.
+- "pronunciation" (optional) is a simple ASCII guide for "germanTarget" (e.g. "ish HET-tuh gairn dee SHPYE-zuh-kar-tuh"). Use hyphens for syllables, CAPS for stress. At A1: required whenever germanTarget contains ä, ö, or ü.
 
 Rules:
 - Keep "assistant" purely in English. Do NOT include German inside "assistant" — put German in "germanTarget" only.

@@ -71,7 +71,7 @@
 	);
 
 	const GERMAN_RATE_BY_LEVEL: Record<GermanLevel, number> = {
-		A1: 0.62,
+		A1: 0.75,
 		A2: 0.74,
 		B1: 0.84,
 		B2: 0.92

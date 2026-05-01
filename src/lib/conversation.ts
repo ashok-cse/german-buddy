@@ -45,7 +45,8 @@ export type GermanLevel = 'A1' | 'A2' | 'B1' | 'B2';
 export const GERMAN_LEVELS = ['A1', 'A2', 'B1', 'B2'] as const satisfies readonly GermanLevel[];
 
 export const GERMAN_LEVEL_HINTS: Record<GermanLevel, string> = {
-	A1: 'Beginner — very short sentences, present tense, common words.',
+	A1:
+		'Beginner — very short phrases, easy vocabulary; prefers words without ä/ö/ü when possible; slower German playback.',
 	A2: 'Elementary — simple sentences, basic past tense, daily vocabulary.',
 	B1: 'Intermediate — connected ideas, opinions, clear past/future.',
 	B2: 'Upper-intermediate — fluent everyday talk, nuanced opinions.'
