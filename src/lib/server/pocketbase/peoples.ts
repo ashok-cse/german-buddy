@@ -42,8 +42,19 @@ function normalizeEmail(email: string): string {
 }
 
 /**
+ * Today vs `trial_ends` (`YYYY-MM-DD`): still on or before last trial day → active.
+ * After that calendar day, trial is over.
+ */
+export function isTrialActive(record: PeoplesRecord): boolean {
+	if (!record.trial_ends) return false;
+	const today = toPbDate(new Date());
+	return today <= record.trial_ends;
+}
+
+/**
  * On Google OAuth: ensure one `peoples` row per email.
- * New rows get a 7-day trial window; existing rows are left unchanged except optional name sync.
+ * New rows get a 7-day trial window. Existing rows: sync name; once calendar date is past
+ * `trial_ends`, set `free_trial_used` to true (trial consumed).
  */
 export async function ensurePeoplesForOAuthUser(
 	pb: PocketBase,
@@ -54,10 +65,19 @@ export async function ensurePeoplesForOAuthUser(
 
 	try {
 		const existing = await pb.collection(PEOPLES_COLLECTION).getFirstListItem<PeoplesRecord>(filter);
-		if (params.name != null && params.name !== '' && existing.name !== params.name) {
-			return await pb.collection(PEOPLES_COLLECTION).update<PeoplesRecord>(existing.id, {
-				name: params.name
-			});
+
+		const today = toPbDate(new Date());
+		const trialExpired = !!existing.trial_ends && today > existing.trial_ends;
+		const shouldMarkTrialUsed = trialExpired && existing.free_trial_used !== true;
+
+		const nameChanged =
+			params.name != null && params.name !== '' && existing.name !== params.name;
+
+		if (shouldMarkTrialUsed || nameChanged) {
+			const patch: UpdatePeoplesInput = {};
+			if (nameChanged) patch.name = params.name ?? '';
+			if (shouldMarkTrialUsed) patch.free_trial_used = true;
+			return await pb.collection(PEOPLES_COLLECTION).update<PeoplesRecord>(existing.id, patch);
 		}
 		return existing;
 	} catch (e: unknown) {
