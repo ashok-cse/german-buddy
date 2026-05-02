@@ -80,3 +80,36 @@ export function saveWordPlayBankToStorage(words: readonly string[]): void {
 		/* quota / private mode */
 	}
 }
+
+/** Lowercase keys only — use with mergeAvoidWordLists output. */
+export function forbiddenWordPlaySet(words: readonly string[]): Set<string> {
+	return new Set(words.map((w) => normalizeWordPlayKey(w)).filter(Boolean));
+}
+
+export function isForbiddenWordPlayTarget(
+	target: string | undefined,
+	forbidden: Set<string>
+): boolean {
+	if (!target?.trim()) return false;
+	const k = normalizeWordPlayKey(target);
+	return k.length > 0 && forbidden.has(k);
+}
+
+/** Fold umlauts for forgiving STT vs expected German (compare only). */
+function foldGermanSpeechKey(s: string): string {
+	return normalizeWordPlayKey(s)
+		.replace(/ä/g, 'a')
+		.replace(/ö/g, 'o')
+		.replace(/ü/g, 'u')
+		.replace(/ß/g, 'ss');
+}
+
+/** Groq/Web Speech often drops umlauts — treat Tür vs tur as match when lengths align. */
+export function speechRoughlyMatchesGermanTarget(expected: string, heard: string): boolean {
+	const e = normalizeWordPlayKey(expected);
+	const h = normalizeWordPlayKey(heard);
+	if (!e || !h) return false;
+	if (e === h) return true;
+	if (h.includes(e) || e.includes(h)) return true;
+	return foldGermanSpeechKey(expected) === foldGermanSpeechKey(heard);
+}

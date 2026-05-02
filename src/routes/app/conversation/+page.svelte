@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
 		startGermanDictation,
@@ -107,12 +107,8 @@
 
 	let groqSttAvailable = $state(false);
 
-	/** Persisted on this device — word-play drill only; grows toward 300+ distinct words. */
-	let wordPlayBank = $state<string[]>([]);
-
-	onMount(() => {
-		wordPlayBank = loadWordPlayBankFromStorage();
-	});
+	/** Persisted on this device — word-play drill only; load synchronously so first `/api/converse` includes avoids (no onMount race). */
+	let wordPlayBank = $state<string[]>(browser ? loadWordPlayBankFromStorage() : []);
 
 	$effect(() => {
 		if (!browser) return;

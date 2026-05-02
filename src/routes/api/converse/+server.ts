@@ -86,7 +86,8 @@ export const POST: RequestHandler = async ({ request }) => {
 				.filter((m) => m.content)
 		: [];
 
-	const lastN = messages.slice(-16);
+	const historyLimit = style === 'tutor' && tutorDrill === 'words' ? 28 : 16;
+	const lastN = messages.slice(-historyLimit);
 
 	const provider = createDefaultLlmProvider();
 	if (!provider) {

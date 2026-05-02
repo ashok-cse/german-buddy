@@ -9,7 +9,10 @@ import type {
 } from '$lib/conversation';
 import {
 	extractGermanTargetsFromHistory,
-	mergeAvoidWordLists
+	forbiddenWordPlaySet,
+	isForbiddenWordPlayTarget,
+	mergeAvoidWordLists,
+	normalizeWordPlayKey
 } from '$lib/word-play';
 
 const LEVEL_GUIDE: Record<GermanLevel, string> = {
@@ -86,7 +89,9 @@ Hard rules for "germanTarget" (CRITICAL):
 Behaviour (same shape as the Tutor drill):
 - "assistant" is what you say IN ENGLISH only (read aloud first). One short sentence: encourage, then name the next target in English (e.g. "Great. Now try the word for Thursday.").
 - "germanTarget" (REQUIRED every turn) is exactly that one or two German words to pronounce. Spoken in German after your English line.
-- After the learner speaks, judge their attempt; if wrong, "correctedUser" is the correct word or two words; "corrections" may list a single wrong token; "explanation" in English is very short; "pronunciation" is ASCII for the target (hyphens, CAPS for stress) — required if letters ä, ö, ü, or ß appear.
+- After the learner speaks, judge their attempt. Their text comes from **speech-to-text**; it may drop umlauts (Tür → tur) or mishear sounds — be charitable: if they clearly attempted **this turn's assigned target**, treat as correct or note only spelling/umlaut in "corrections". Compare loosely (ignore case; forgive missing ä ö ü ß when intent is obvious).
+- If they clearly said a **different** word that appears in the ALREADY USED list above, say so briefly in English and still assign a **brand-new** germanTarget not in that list.
+- If wrong, "correctedUser" is proper German for what they should have said; "corrections" may list one token fix; "explanation" in English is very short; "pronunciation" is ASCII for the target — required if ä, ö, ü, or ß appear in germanTarget.
 
 Rules:
 - No German inside "assistant" — only in "germanTarget".
@@ -164,11 +169,51 @@ export async function runGermanConversationTurn(
 				: buildTutorPrompt(input.level, input.scenario)
 			: buildRoleplayPrompt(input.level, input.scenario);
 
-	const messages = [
+	const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
 		{ role: 'system' as const, content: system },
 		...input.history.map((m) => ({ role: m.role, content: m.content }))
 	];
 
-	const raw = await provider.complete({ messages, jsonObject: true });
-	return parseConversationResponse(raw);
+	let raw = await provider.complete({ messages, jsonObject: true });
+	let parsed = parseConversationResponse(raw);
+
+	if (input.style === 'tutor' && tutorDrill === 'words' && avoidForWords.length > 0) {
+		const forbidden = forbiddenWordPlaySet(avoidForWords);
+		let gt = parsed.germanTarget;
+		if (isForbiddenWordPlayTarget(gt, forbidden)) {
+			const bad = normalizeWordPlayKey(gt ?? '');
+			const retryUser = `FIX REQUIRED (internal): Your germanTarget repeated "${bad}" which is FORBIDDEN — it is already in the practiced list. Reply with ONLY the same JSON schema. germanTarget MUST be one or two German words that are NOT in this exact list (case-insensitive): ${avoidForWords.join(', ')}. Pick a completely different domain if needed (animal, food, verb, color).`;
+			raw = await provider.complete({
+				messages: [...messages, { role: 'user' as const, content: retryUser }],
+				jsonObject: true
+			});
+			parsed = parseConversationResponse(raw);
+			gt = parsed.germanTarget;
+			if (isForbiddenWordPlayTarget(gt, forbidden)) {
+				const fallbacks = [
+					'Lampe',
+					'Zebra',
+					'Kino',
+					'Pilz',
+					'Vogel',
+					'Wolke',
+					'Küche',
+					'Tisch',
+					'Regenschirm',
+					'Quatsch',
+					'freundlich'
+				];
+				const pick =
+					fallbacks.find((w) => !isForbiddenWordPlayTarget(w, forbidden)) ?? 'Obst';
+				parsed = {
+					...parsed,
+					assistant: "Here's a new word — sorry about the repeat. Try this one.",
+					germanTarget: pick,
+					explanation: undefined
+				};
+			}
+		}
+	}
+
+	return parsed as ConversationTurnResult;
 }
