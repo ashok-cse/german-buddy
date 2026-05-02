@@ -17,10 +17,14 @@ Sign-in is **Google OAuth** (Auth.js). User profiles and **7-day free trials** a
 ## Features
 
 - **Landing page (`/`)** — minimalist hero + waitlist signup for `germanbuddy.ai`.
-- **Practice app (`/app`)** — three modes:
+- **Practice app (`/app`)** — three areas:
   - **Write** — answer a prompt in German; get corrected text, a more natural phrasing, a simple English line, and one short tip.
   - **Speak** — same loop, but dictate your answer (Web Speech API where supported); prompts and corrections read aloud.
-  - **Chat** — voice-driven roleplay or tutor session. Pick a **scenario** (bakery, restaurant, doctor, job interview, …), **level** (A1–B2), and **style** (roleplay vs. tutor). Word-level corrections with character-diff highlighting and pronunciation hints.
+  - **Conversation** — voice session that feels like a **phone call** (no long chat history; one “Buddy / You” turn at a time). Pick **scenario**, **level** (A1–B2), and **style**:
+    - **Roleplay** — AI speaks German in character; you reply in German; Piper TTS when configured.
+    - **Tutor** — short English cue first, then German to repeat (same audio order). **Tutor drill**: **Phrases** (short German lines) or **Word play** (single words / tiny chunks — numbers, weekdays, daily vocab). Word play tracks distinct targets per browser (**saved vocabulary bank**, goal 300+ words over time) and sends them to the model so it avoids repeats.
+  - **Speech-to-text** — when **`GROQ_API_KEY`** is set (or your chat LLM already uses Groq), Conversation prefers **Groq Whisper** (`whisper-large-v3`, German) via `POST /api/transcribe`; otherwise **Web Speech** (Chrome/Edge). Half-duplex flow: mic listens while you speak; speaker plays tutor/roleplay audio without chaining bogus “resume mic” loops.
+  - Corrections in tutor mode: word-level diff highlighting, pronunciation hints, teacher feedback panel.
 - **History** — last 10 runs persist in browser `localStorage`.
 - **Google sign-in** — Auth.js session; first sign-in creates a `peoples` row in PocketBase with trial dates.
 - **Trial gate** — active trial (`today` ≤ `trial_ends` in PocketBase) required for `/app` and practice APIs; expired trial redirects to `/trial-expired`.
@@ -49,6 +53,8 @@ cp .env.example .env
 | `LLM_JSON_OBJECT` | No | `true` / `false` — request JSON-object mode (default: `true`) |
 
 The server calls `POST {LLM_BASE_URL}/chat/completions` with an OpenAI-compatible payload. Set `LLM_BASE_URL` + `LLM_MODEL` to swap to OpenAI or any other compatible provider. Discover Groq model ids with `GET https://api.groq.com/openai/v1/models` or the [Groq models docs](https://console.groq.com/docs/models).
+
+**Speech transcription (Conversation):** the same Groq key is used for `POST https://api.groq.com/openai/v1/audio/transcriptions` (Whisper). If you use **OpenAI only** for chat, set **`GROQ_API_KEY`** separately for STT, or rely on the browser Web Speech API.
 
 ### Auth (Google OAuth + Auth.js)
 
@@ -83,7 +89,7 @@ If these are unset locally, the app **skips** the PocketBase trial check (useful
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `WAITLIST_FILE` | No | Path to the JSONL waitlist log. Default: `./data/waitlist.jsonl` locally, `/app/data/waitlist.jsonl` in Docker. |
-| `PIPER_TTS_URL` | No | Optional Piper HTTP server for `/api/tts` (see `.env.example`). |
+| `PIPER_TTS_URL` | No | Optional Piper HTTP server for `/api/tts` (German TTS in Conversation / Speak). |
 
 **Public repos:** keep real keys in `.env` only (gitignored). Never commit secrets; leave `.env.example` without real values.
 
@@ -137,12 +143,14 @@ After deploying, the file will be available at `/app/data/waitlist.jsonl` inside
 | `/login` | Google sign-in | public |
 | `/logout` | Clears Auth.js session, redirects | public |
 | `/auth/*` | Auth.js OAuth callbacks | public |
-| `/app`, `/app/*` | Practice app (write / speak / chat) | Google session + **active trial** |
+| `/app`, `/app/*` | Practice app (write / speak / conversation) | Google session + **active trial** |
 | `/trial-expired` | Shown when the PocketBase trial window has ended | Google session |
 | `/dashboard` | Redirect → `/app/write` | session + trial |
 | `POST /api/correct` | `{ prompt, answer }` → corrections JSON | session + trial |
-| `POST /api/converse` | Chat completions + corrections | session + trial |
-| `POST /api/tts` | Server TTS (if `PIPER_TTS_URL` set) | session + trial |
+| `POST /api/converse` | Conversation LLM (`style`, optional `tutorDrill`, optional `avoidGermanTargets` for word play) | session + trial |
+| `GET /api/transcribe` | `{ available: boolean }` — Groq key configured for Whisper | session + trial |
+| `POST /api/transcribe` | Groq Whisper (`multipart` field `audio`, optional `language`) | session + trial |
+| `POST /api/tts` | Piper WAV (if `PIPER_TTS_URL` set) | session + trial |
 | `POST /api/waitlist` | `{ email }` → JSONL log | public |
 
 ### Auth and trial
@@ -164,8 +172,12 @@ After deploying, the file will be available at `/app/data/waitlist.jsonl` inside
 - **`src/routes/app/+layout.svelte`** — App chrome + **sign out**.
 - **`src/routes/api/{correct,converse,tts,waitlist}/+server.ts`** — POST endpoints.
 - **`src/lib/prompts.ts`** / **`practice-catalog.ts`** — prompts and topics.
-- **`src/lib/conversation.ts`** — scenarios and levels (A1–B2).
+- **`src/lib/conversation.ts`** — scenarios, levels (A1–B2), tutor drill modes (`phrases` / `words`).
+- **`src/lib/word-play.ts`** — normalized vocabulary keys, localStorage bank for word play, helpers shared with the server.
+- **`src/lib/groq-dictation.ts`** — Groq path: mic + VAD segments → `/api/transcribe`.
+- **`src/lib/speech-recognition.ts`** — Web Speech dictation fallback.
+- **`src/lib/server/groq-speech.ts`** — resolves Groq API key for Whisper-only endpoints.
 - **`src/lib/server/llm/`** — OpenAI-compatible provider; **`factory.ts`** wires env.
-- **`src/lib/server/correct-german.ts`** / **`converse-german.ts`** — LLM prompts and parsing.
+- **`src/lib/server/correct-german.ts`** / **`converse-german.ts`** — LLM prompts and parsing (including word-play avoid list).
 
 No external UI kit — **Tailwind CSS v4** via Vite plugin (`src/routes/layout.css`).
