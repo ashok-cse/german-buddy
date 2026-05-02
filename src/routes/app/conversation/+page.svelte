@@ -7,6 +7,7 @@
 		ensureMicPermission,
 		type DictationControl
 	} from '$lib/speech-recognition';
+	import { startGroqGermanDictation, canUseGroqDictation } from '$lib/groq-dictation';
 	import { primeTts, prefetchGermanTts, speak, speakGerman, stopGermanTts } from '$lib/german-tts';
 	import {
 		CONVERSATION_SCENARIOS,
@@ -46,9 +47,8 @@
 	let chatRestartTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastAssistantText = '';
 	let chatEchoGuardUntil = 0;
-	// Pauses between clauses are longer in learner German than in casual EN speech.
-	const CHAT_SILENCE_MS = 3200;
-	const CHAT_RESUME_DELAY_MS = 900;
+	const CHAT_SILENCE_MS = 2000;
+	const CHAT_RESUME_DELAY_MS = 450;
 	const CHAT_ECHO_WINDOW_MS = 1500;
 
 	let chatLevel = $state<GermanLevel>('A2');
@@ -70,25 +70,28 @@
 			!!chatLastPronunciation
 	);
 
-	const GERMAN_RATE_BY_LEVEL: Record<GermanLevel, number> = {
-		A1: 0.75,
-		A2: 0.74,
-		B1: 0.84,
-		B2: 0.92
-	};
-	const ENGLISH_RATE_BY_LEVEL: Record<GermanLevel, number> = {
-		A1: 0.88,
-		A2: 0.94,
-		B1: 1,
-		B2: 1
-	};
-	const chatGermanRate = $derived(GERMAN_RATE_BY_LEVEL[chatLevel]);
-	const chatEnglishRate = $derived(ENGLISH_RATE_BY_LEVEL[chatLevel]);
+	/** Normal-speed playback for German (Piper) and English (browser) in chat. */
+	const CHAT_GERMAN_RATE = 1;
+	const CHAT_ENGLISH_RATE = 1;
+
+	let groqSttAvailable = $state(false);
 
 	$effect(() => {
 		if (!browser) return;
-		speechSupported = !!getSpeechRecognitionCtor();
 		ttsSupported = 'speechSynthesis' in window;
+		speechSupported = groqSttAvailable || !!getSpeechRecognitionCtor();
+	});
+
+	$effect(() => {
+		if (!browser || !canUseGroqDictation()) return;
+		void fetch('/api/transcribe')
+			.then((r) => (r.ok ? r.json() : Promise.resolve({})))
+			.then((d: { available?: boolean }) => {
+				groqSttAvailable = !!d?.available;
+			})
+			.catch(() => {
+				groqSttAvailable = false;
+			});
 	});
 
 	// Auto-scroll the chat thread to bottom when content changes.
@@ -218,8 +221,8 @@
 		chatPhase = 'listening';
 		chatEchoGuardUntil = Date.now() + CHAT_ECHO_WINDOW_MS;
 		if (chatBuffer.trim()) scheduleAutoSubmit();
-		chatDictation = startGermanDictation({
-			onFinal: (text) => {
+		const handlers = {
+			onFinal: (text: string) => {
 				const t = text.trim();
 				if (!t) return;
 				if (looksLikeEchoOfAssistant(t)) return;
@@ -228,7 +231,7 @@
 				chatLiveTranscript = '';
 				scheduleAutoSubmit();
 			},
-			onInterim: (t) => {
+			onInterim: (t: string) => {
 				const trimmed = t.trim();
 				if (!trimmed) return;
 				if (looksLikeEchoOfAssistant(trimmed)) return;
@@ -236,7 +239,7 @@
 				if (trimmed !== chatLiveTranscript) chatLiveTranscript = trimmed;
 				scheduleAutoSubmit();
 			},
-			onError: (msg) => {
+			onError: (msg: string) => {
 				chatError = msg;
 			},
 			onStopped: () => {
@@ -252,7 +255,10 @@
 					scheduleResumeListening();
 				}
 			}
-		});
+		};
+		chatDictation = groqSttAvailable
+			? startGroqGermanDictation(handlers)
+			: startGermanDictation(handlers);
 	}
 
 	function scheduleResumeListening(): void {
@@ -273,7 +279,7 @@
 		lastAssistantText = `${lastAssistantText} ${trimmed}`.trim();
 		if (wasInSession) chatPhase = 'speaking';
 		speakGerman(trimmed, {
-			rate: chatGermanRate,
+			rate: CHAT_GERMAN_RATE,
 			onEnd: () => {
 				if (!chatSessionActive) {
 					if (wasInSession) chatPhase = 'idle';
@@ -295,18 +301,19 @@
 		if (chatStyle === 'tutor') {
 			const playGerman = () => {
 				if (!chatSessionActive) return;
-				if (germanTarget) speakGerman(germanTarget, { rate: chatGermanRate, onEnd: onAllDone });
+				if (germanTarget)
+					speakGerman(germanTarget, { rate: CHAT_GERMAN_RATE, onEnd: onAllDone });
 				else onAllDone();
 			};
 			if (englishOrGerman)
 				speak(englishOrGerman, 'en-US', {
-					rate: chatEnglishRate,
+					rate: CHAT_ENGLISH_RATE,
 					preferMale: true,
 					onEnd: playGerman
 				});
 			else playGerman();
 		} else {
-			speakGerman(englishOrGerman, { rate: chatGermanRate, onEnd: onAllDone });
+			speakGerman(englishOrGerman, { rate: CHAT_GERMAN_RATE, onEnd: onAllDone });
 		}
 	}
 
@@ -503,7 +510,8 @@
 				<p
 					class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
 				>
-					Speech-to-text needs a supported browser (e.g. Chrome or Edge).
+					Speech needs a mic plus either Groq Whisper (set <code class="font-mono text-xs">GROQ_API_KEY</code>
+					or Groq for chat) or Chrome/Edge Web Speech.
 				</p>
 			{/if}
 
@@ -558,9 +566,6 @@
 					</div>
 					<p class="text-xs leading-relaxed text-stone-500">
 						{GERMAN_LEVEL_HINTS[chatLevel]}
-						{#if chatLevel === 'A1' || chatLevel === 'A2'}
-							<span class="text-stone-600"> · German plays slower at this level.</span>
-						{/if}
 					</p>
 				</div>
 
@@ -602,7 +607,7 @@
 				class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-stone-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-500 disabled:cursor-not-allowed disabled:opacity-60"
 				onclick={() => void startChatSession()}
 				disabled={chatLoading || !speechSupported}
-				title={!speechSupported ? 'Use Chrome or Edge for speech recognition' : undefined}
+				title={!speechSupported ? 'Enable Groq STT or use Chrome/Edge' : undefined}
 			>
 				<span class="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true"></span>
 				Start conversation

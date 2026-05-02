@@ -13,7 +13,14 @@ import { matchRateLimitRule, takeRateLimit } from '$lib/server/rate-limit';
  * Routes behind login. The landing page (`/`), auth routes (`/auth/*`), login/logout,
  * and `/api/waitlist` stay public; the practice app and LLM-backed APIs require a session.
  */
-const PROTECTED_PREFIXES = ['/app', '/dashboard', '/api/correct', '/api/converse', '/api/tts'];
+const PROTECTED_PREFIXES = [
+	'/app',
+	'/dashboard',
+	'/api/correct',
+	'/api/converse',
+	'/api/tts',
+	'/api/transcribe'
+];
 
 function isProtected(pathname: string): boolean {
 	return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

@@ -63,7 +63,8 @@ export function requiresTrialGate(pathname: string): boolean {
 	if (
 		pathname.startsWith('/api/correct') ||
 		pathname.startsWith('/api/converse') ||
-		pathname.startsWith('/api/tts')
+		pathname.startsWith('/api/tts') ||
+		pathname.startsWith('/api/transcribe')
 	) {
 		return true;
 	}

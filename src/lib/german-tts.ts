@@ -1,5 +1,5 @@
-/** Slightly slower than default (1) for learner-friendly pacing. */
-const GERMAN_TTS_RATE = 0.84;
+/** Piper / `<audio>` playback at normal speed for smoother dialogue timing. */
+const GERMAN_TTS_RATE = 1;
 
 /** 46-byte silent WAV used to unlock <audio> playback on iOS in `primeTts`. */
 const SILENT_WAV_DATA_URL =

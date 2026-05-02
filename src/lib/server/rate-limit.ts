@@ -51,6 +51,7 @@ export const API_RATE_LIMIT_RULES: RateLimitRule[] = [
 	{ prefix: '/api/correct', name: 'correct', max: 40 },
 	{ prefix: '/api/converse', name: 'converse', max: 30 },
 	{ prefix: '/api/tts', name: 'tts', max: 60 },
+	{ prefix: '/api/transcribe', name: 'transcribe', max: 120 },
 	{ prefix: '/api/waitlist', name: 'waitlist', max: 15 }
 ];
 

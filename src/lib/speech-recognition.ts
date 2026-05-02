@@ -378,7 +378,7 @@ export function startGermanDictation(
 		// Chrome/iOS can fire `onend` after every utterance even with continuous=true.
 		// Restart on a small delay so the audio pipeline fully releases before re-arming
 		// (also keeps mobile from churning the mic on every short pause).
-		restartTimer = setTimeout(tryStart, 250);
+		restartTimer = setTimeout(tryStart, 120);
 	};
 
 	try {
