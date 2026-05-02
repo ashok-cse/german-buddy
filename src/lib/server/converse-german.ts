@@ -4,7 +4,8 @@ import type {
 	ConversationMessage,
 	ConversationStyle,
 	ConversationTurnResult,
-	GermanLevel
+	GermanLevel,
+	TutorDrillMode
 } from '$lib/conversation';
 
 const LEVEL_GUIDE: Record<GermanLevel, string> = {
@@ -41,6 +42,41 @@ Output: return ONLY valid JSON with these keys:
 - corrections: array of {wrong, right, note?} (optional, single-word fixes only)
 - explanation: string (optional, English teaching explanation)
 - pronunciation: string (optional, ASCII pronunciation guide)`;
+}
+
+function buildWordPlayPrompt(level: GermanLevel, scenario: string | undefined): string {
+	const theme = scenario?.trim()
+		? `Optional theme — bias word choice toward this setting when it fits: ${scenario.trim()}`
+		: 'Use varied everyday A1-style vocabulary (not tied to one scenario).';
+
+	return `You are an English-speaking German pronunciation coach running WORD PLAY — drilling sounds and short chunks only. This prepares beginners before full sentences.
+
+${theme}
+
+Learner level: ${level}. Keep difficulty appropriate; prefer cognates and high-frequency words.
+
+Hard rules for "germanTarget" (CRITICAL):
+- DEFAULT: exactly ONE German word — numbers as German words (eins, zwei, … dreißig), weekdays (Montag … Sonntag), months if asked, colors (rot, blau, …), common nouns (Brot, Wasser, Tür), politeness words (bitte, danke), classroom words, clock/time words (halb, Viertel), infinitive verbs as one word (gehen, kaufen).
+- ONLY where German naturally uses a frozen phrase of TWO words, you may use TWO words — never more. Examples: "guten Morgen", "guten Tag", "danke schön", "bis bald". Never output questions or dialogue sentences.
+- NEVER output a full sentence, clause, or 3+ words in "germanTarget". If you are tempted to give a sentence, split it: one word this turn, another next turn.
+- Rotate variety across turns: mix numbers, days, months, times, food, home, transport words, colors, and polite phrases so the learner practises many sounds.
+
+Behaviour (same shape as the Tutor drill):
+- "assistant" is what you say IN ENGLISH only (read aloud first). One short sentence: encourage, then name the next target in English (e.g. "Great. Now try the word for Thursday.").
+- "germanTarget" (REQUIRED every turn) is exactly that one or two German words to pronounce. Spoken in German after your English line.
+- After the learner speaks, judge their attempt; if wrong, "correctedUser" is the correct word or two words; "corrections" may list a single wrong token; "explanation" in English is very short; "pronunciation" is ASCII for the target (hyphens, CAPS for stress) — required if letters ä, ö, ü, or ß appear.
+
+Rules:
+- No German inside "assistant" — only in "germanTarget".
+- No markdown, lists, or emojis.
+
+Output: return ONLY valid JSON with these keys:
+- assistant: string (REQUIRED, English only)
+- germanTarget: string (REQUIRED, one word OR allowed two-word phrase only)
+- correctedUser: string (optional)
+- corrections: array of {wrong, right, note?} (optional)
+- explanation: string (optional, English)
+- pronunciation: string (optional, ASCII)`;
 }
 
 function buildTutorPrompt(level: GermanLevel, scenario: string | undefined): string {
@@ -83,6 +119,8 @@ export type ConversationTurnInput = {
 	level: GermanLevel;
 	scenario?: string;
 	style: ConversationStyle;
+	/** Tutor only: `words` uses word-play prompt; default `phrases`. */
+	tutorDrill?: TutorDrillMode;
 	history: ConversationMessage[];
 };
 
@@ -90,9 +128,12 @@ export async function runGermanConversationTurn(
 	provider: LlmProvider,
 	input: ConversationTurnInput
 ): Promise<ConversationTurnResult> {
+	const tutorDrill: TutorDrillMode = input.tutorDrill ?? 'phrases';
 	const system =
 		input.style === 'tutor'
-			? buildTutorPrompt(input.level, input.scenario)
+			? tutorDrill === 'words'
+				? buildWordPlayPrompt(input.level, input.scenario)
+				: buildTutorPrompt(input.level, input.scenario)
 			: buildRoleplayPrompt(input.level, input.scenario);
 
 	const messages = [

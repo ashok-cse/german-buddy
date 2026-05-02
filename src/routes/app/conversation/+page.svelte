@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
 		startGermanDictation,
@@ -16,11 +16,15 @@
 		CONVERSATION_STYLE_LABELS,
 		GERMAN_LEVELS,
 		GERMAN_LEVEL_HINTS,
+		TUTOR_DRILL_HINTS,
+		TUTOR_DRILL_LABELS,
+		TUTOR_DRILL_MODES,
 		getScenarioById,
 		type ConversationMessage,
 		type ConversationStyle,
 		type ConversationTurnResult,
 		type GermanLevel,
+		type TutorDrillMode,
 		type WordCorrection
 	} from '$lib/conversation';
 	import { diffChars } from '$lib/diff-chars';
@@ -54,10 +58,14 @@
 	let chatLevel = $state<GermanLevel>('A2');
 	let chatScenarioId = $state<string>(CONVERSATION_SCENARIOS[0].id);
 	let chatStyle = $state<ConversationStyle>('roleplay');
-	let chatLastTarget = $state<string | null>(null);
+	/** Tutor only — switches LLM between phrase drills and word-play prompts. */
+	let tutorDrill = $state<TutorDrillMode>('phrases');
 	let lastUserUtterance = '';
-
-	let chatScrollEl = $state<HTMLDivElement | null>(null);
+	/** Call UI: last buddy lines (no scrolling transcript). */
+	let callBuddyEnglish = $state('');
+	let callBuddyGerman = $state('');
+	/** Last completed user utterance (shown when not actively dictating). */
+	let callLastYou = $state('');
 
 	const currentScenario = $derived(
 		getScenarioById(chatScenarioId) ?? CONVERSATION_SCENARIOS[0]
@@ -68,6 +76,24 @@
 			chatLastCorrections.length > 0 ||
 			!!chatLastExplanation ||
 			!!chatLastPronunciation
+	);
+
+	const tutorLike = $derived(chatStyle === 'tutor');
+	const targetPromptLabel = $derived(
+		tutorDrill === 'words' ? 'Say this word' : 'Say this in German'
+	);
+
+	const speakerActive = $derived(chatPhase === 'speaking');
+	const micActive = $derived(chatPhase === 'listening');
+
+	const youLineLive = $derived(
+		(chatBuffer + (chatLiveTranscript ? ` ${chatLiveTranscript}` : '')).trim()
+	);
+
+	const callYouDisplay = $derived(
+		chatPhase === 'listening'
+			? youLineLive || callLastYou || 'Speak when you are ready.'
+			: callLastYou || '…'
 	);
 
 	/** Normal-speed playback for German (Piper) and English (browser) in chat. */
@@ -92,19 +118,6 @@
 			.catch(() => {
 				groqSttAvailable = false;
 			});
-	});
-
-	// Auto-scroll the chat thread to bottom when content changes.
-	$effect(() => {
-		// Track all things that grow the thread.
-		void chatMessages.length;
-		void chatLiveTranscript;
-		void chatBuffer;
-		void hasFeedback;
-		if (!chatScrollEl) return;
-		void tick().then(() => {
-			chatScrollEl?.scrollTo({ top: chatScrollEl.scrollHeight, behavior: 'smooth' });
-		});
 	});
 
 	function clearChatSilenceTimer(): void {
@@ -170,8 +183,10 @@
 		chatLastCorrections = [];
 		chatLastExplanation = null;
 		chatLastPronunciation = null;
-		chatLastTarget = null;
 		chatMessages = [];
+		callBuddyEnglish = '';
+		callBuddyGerman = '';
+		callLastYou = '';
 		chatBuffer = '';
 		chatLiveTranscript = '';
 		lastAssistantText = '';
@@ -203,6 +218,12 @@
 	function setChatStyle(style: ConversationStyle): void {
 		if (chatStyle === style) return;
 		chatStyle = style;
+		if (chatSessionActive) endChatSession();
+	}
+
+	function setTutorDrill(mode: TutorDrillMode): void {
+		if (tutorDrill === mode) return;
+		tutorDrill = mode;
 		if (chatSessionActive) endChatSession();
 	}
 
@@ -298,7 +319,7 @@
 			else chatPhase = 'idle';
 		};
 
-		if (chatStyle === 'tutor') {
+		if (tutorLike) {
 			const playGerman = () => {
 				if (!chatSessionActive) return;
 				if (germanTarget)
@@ -332,13 +353,13 @@
 			return;
 		}
 		lastUserUtterance = normalizeForEcho(text);
+		callLastYou = text;
 		const next = [...chatMessages, { role: 'user', content: text } satisfies ConversationMessage];
 		chatMessages = next;
 		chatLastCorrection = null;
 		chatLastCorrections = [];
 		chatLastExplanation = null;
 		chatLastPronunciation = null;
-		chatLastTarget = null;
 		await fetchAssistantTurn(next);
 	}
 
@@ -354,7 +375,8 @@
 					level: chatLevel,
 					style: chatStyle,
 					scenario: currentScenario.setup,
-					messages: history
+					messages: history,
+					...(chatStyle === 'tutor' ? { tutorDrill } : {})
 				})
 			});
 			if (!res.ok) {
@@ -377,7 +399,7 @@
 					: '';
 			const assistantText = (data?.assistant ?? '').trim();
 
-			const piperLine = chatStyle === 'tutor' ? germanTarget : assistantText;
+			const piperLine = tutorLike ? germanTarget : assistantText;
 			if (chatSessionActive && ttsSupported && piperLine.trim()) {
 				prefetchGermanTts(piperLine.trim());
 			}
@@ -411,12 +433,16 @@
 				typeof data?.pronunciation === 'string' && data.pronunciation.trim()
 					? data.pronunciation.trim()
 					: null;
-			chatLastTarget = germanTarget || null;
-
 			const transcriptForChat =
-				chatStyle === 'tutor' && germanTarget
-					? `${assistantText}\n\n→ ${germanTarget}`
-					: assistantText;
+				tutorLike && germanTarget ? `${assistantText}\n\n→ ${germanTarget}` : assistantText;
+
+			if (tutorLike) {
+				callBuddyEnglish = assistantText;
+				callBuddyGerman = germanTarget;
+			} else {
+				callBuddyEnglish = '';
+				callBuddyGerman = assistantText || germanTarget;
+			}
 
 			if (assistantText || germanTarget) {
 				chatMessages = [
@@ -428,10 +454,9 @@
 				// land instead of being silently dropped as "looks like the bot's
 				// own voice". In roleplay the assistant's own German is what we
 				// want to suppress (speaker bleed), so include it.
-				lastAssistantText =
-					chatStyle === 'tutor'
-						? assistantText.trim()
-						: `${assistantText} ${germanTarget}`.trim();
+				lastAssistantText = tutorLike
+					? assistantText.trim()
+					: `${assistantText} ${germanTarget}`.trim();
 				if (chatSessionActive && ttsSupported) {
 					chatPhase = 'speaking';
 					playAssistantTurn(assistantText, germanTarget);
@@ -457,14 +482,14 @@
 
 	const phaseLabel = $derived(
 		chatPhase === 'connecting'
-			? 'Verbinde …'
+			? 'Connecting…'
 			: chatPhase === 'listening'
-				? 'Hört zu …'
+				? 'Your mic · listening'
 				: chatPhase === 'thinking'
-					? 'Denkt nach …'
+					? 'Thinking…'
 					: chatPhase === 'speaking'
-						? 'Spricht …'
-						: 'Bereit'
+						? 'Buddy speaking'
+						: 'Ready'
 	);
 
 	const phaseTone = $derived(
@@ -502,7 +527,8 @@
 					Talk with your AI buddy.
 				</h1>
 				<p class="text-sm leading-relaxed text-stone-600">
-					Pick a level + scenario, tap start, then just speak.
+					Pick level & scenario, start a voice call — only the current turn is shown, like talking on
+					the phone.
 				</p>
 			</header>
 
@@ -543,6 +569,33 @@
 						{CONVERSATION_STYLE_HINTS[chatStyle]}
 					</p>
 				</div>
+
+				{#if chatStyle === 'tutor'}
+					<div class="space-y-1.5">
+						<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Tutor drill</p>
+						<div
+							class="flex rounded-xl border border-stone-200 bg-stone-100/90 p-1 shadow-inner"
+							role="group"
+							aria-label="Tutor drill type"
+						>
+							{#each TUTOR_DRILL_MODES as mode (mode)}
+								<button
+									type="button"
+									class="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 {tutorDrill ===
+									mode
+										? 'bg-white text-stone-900 shadow-sm'
+										: 'text-stone-600 hover:text-stone-900'}"
+									onclick={() => setTutorDrill(mode)}
+								>
+									{TUTOR_DRILL_LABELS[mode]}
+								</button>
+							{/each}
+						</div>
+						<p class="text-xs leading-relaxed text-stone-500">
+							{TUTOR_DRILL_HINTS[tutorDrill]}
+						</p>
+					</div>
+				{/if}
 
 				<div class="space-y-1.5">
 					<p class="text-xs font-medium uppercase tracking-wide text-stone-500">Level</p>
@@ -614,15 +667,22 @@
 			</button>
 		</div>
 	{:else}
-		<!-- Active chat screen -->
+		<!-- Active voice call — current turn only (history kept for the model, not shown). -->
 		<div
 			class="shrink-0 border-b border-stone-200/80 bg-white/90 px-4 py-2 backdrop-blur sm:px-6"
 		>
-			<div class="flex items-center justify-between gap-3">
-				<p class="min-w-0 truncate text-xs text-stone-600">
-					<span class="font-semibold text-stone-900">{chatLevel}</span>
-					· {CONVERSATION_STYLE_LABELS[chatStyle]} · {currentScenario.label}
-				</p>
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<div class="min-w-0">
+					<p class="truncate text-xs text-stone-600">
+						<span class="font-semibold text-stone-900">{chatLevel}</span>
+						· {CONVERSATION_STYLE_LABELS[chatStyle]}
+						{#if chatStyle === 'tutor'}
+							· {TUTOR_DRILL_LABELS[tutorDrill]}
+						{/if}
+						· {currentScenario.label}
+					</p>
+					<p class="text-[11px] text-stone-500">Voice call · current line only</p>
+				</div>
 				<span class="flex shrink-0 items-center gap-1.5 text-xs text-stone-500">
 					<span
 						class="h-2 w-2 rounded-full {phaseTone} {phaseAnimated ? 'animate-pulse' : ''}"
@@ -634,63 +694,78 @@
 		</div>
 
 		<div
-			bind:this={chatScrollEl}
-			class="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-6 [overscroll-behavior:contain]"
-			aria-label="Chat thread"
+			class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5 sm:px-6"
+			aria-label="Voice call"
 		>
-			{#if chatMessages.length === 0}
-				<p class="text-sm text-stone-500">Verbinde …</p>
-			{:else}
-				{#each chatMessages as m, i (i)}
-					<div class="flex {m.role === 'user' ? 'justify-end' : 'justify-start'}">
-						<div
-							class="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm {m.role ===
-							'user'
-								? 'bg-stone-900 text-white'
-								: 'border border-stone-200 bg-white text-stone-900'}"
-						>
-							{m.content}
-						</div>
+			<div class="flex justify-center gap-10 pb-6">
+				<div class="flex flex-col items-center gap-2">
+					<span class="text-[10px] font-semibold uppercase tracking-wide text-stone-500"
+						>Speaker</span
+					>
+					<div
+						class="flex h-16 w-16 items-center justify-center rounded-full border-2 text-2xl transition {speakerActive
+							? 'border-emerald-500 bg-emerald-100 text-emerald-900 shadow-md shadow-emerald-500/25'
+							: 'border-stone-200 bg-stone-100 text-stone-400'}"
+						aria-label={speakerActive ? 'Buddy audio active' : 'Buddy audio idle'}
+					>
+						🔊
 					</div>
-				{/each}
-				{#if chatBuffer || chatLiveTranscript}
-					<div class="flex justify-end">
-						<div
-							class="max-w-[85%] rounded-2xl border border-stone-300 border-dashed bg-white px-4 py-3 text-sm leading-relaxed text-stone-700 shadow-sm"
-						>
-							{(chatBuffer + (chatLiveTranscript ? ` ${chatLiveTranscript}` : '')).trim()}
-						</div>
-					</div>
-				{/if}
-			{/if}
-
-			{#if chatStyle === 'tutor' && chatLastTarget}
-				<div
-					class="space-y-2 rounded-2xl border border-stone-300 bg-white px-4 py-3 text-sm text-stone-900 shadow-sm"
-				>
-					<div class="flex flex-wrap items-center justify-between gap-2">
-						<p class="text-xs font-semibold uppercase tracking-wide text-stone-500">
-							Say this in German
-						</p>
-						{#if ttsSupported}
-							<button
-								type="button"
-								class="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-xs font-medium text-stone-800 shadow-sm transition hover:bg-stone-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400"
-								onclick={() => hearGerman(chatLastTarget ?? '')}
-							>
-								<span class="text-stone-700" aria-hidden="true">▶</span>
-								Hear it
-							</button>
-						{/if}
-					</div>
-					<p class="text-base font-medium leading-relaxed text-stone-900">{chatLastTarget}</p>
-					{#if chatLastPronunciation}
-						<p class="font-mono text-xs leading-relaxed text-stone-600">
-							{chatLastPronunciation}
-						</p>
-					{/if}
 				</div>
-			{/if}
+				<div class="flex flex-col items-center gap-2">
+					<span class="text-[10px] font-semibold uppercase tracking-wide text-stone-500">Mic</span>
+					<div
+						class="flex h-16 w-16 items-center justify-center rounded-full border-2 text-2xl transition {micActive
+							? 'border-red-500 bg-red-50 text-red-900 shadow-md shadow-red-500/25'
+							: 'border-stone-200 bg-stone-100 text-stone-400'}"
+						aria-label={micActive ? 'Your microphone active' : 'Microphone idle'}
+					>
+						🎤
+					</div>
+				</div>
+			</div>
+
+			<div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+				<p class="text-xs font-semibold uppercase tracking-wide text-stone-500">Buddy</p>
+				{#if chatPhase === 'connecting' && !callBuddyGerman && !callBuddyEnglish}
+					<p class="mt-2 text-sm text-stone-500">Connecting…</p>
+				{:else if tutorLike}
+					{#if callBuddyEnglish}
+						<p class="mt-2 text-sm leading-relaxed text-stone-800">{callBuddyEnglish}</p>
+					{/if}
+					{#if callBuddyGerman}
+						<div class="mt-3 flex flex-wrap items-end justify-between gap-2">
+							<div class="min-w-0 flex-1">
+								<p class="text-xs font-semibold uppercase tracking-wide text-stone-400">
+									{targetPromptLabel}
+								</p>
+								<p class="text-xl font-semibold leading-snug text-stone-900">{callBuddyGerman}</p>
+							</div>
+							{#if ttsSupported}
+								<button
+									type="button"
+									class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs font-medium text-stone-800 shadow-sm transition hover:bg-stone-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400"
+									onclick={() => hearGerman(callBuddyGerman)}
+								>
+									<span class="text-stone-700" aria-hidden="true">▶</span>
+									Hear German
+								</button>
+							{/if}
+						</div>
+						{#if chatLastPronunciation}
+							<p class="mt-2 font-mono text-xs leading-relaxed text-stone-600">
+								{chatLastPronunciation}
+							</p>
+						{/if}
+					{/if}
+				{:else if callBuddyGerman}
+					<p class="mt-2 text-base leading-relaxed text-stone-900">{callBuddyGerman}</p>
+				{/if}
+			</div>
+
+			<div class="mt-4 rounded-2xl border border-dashed border-stone-300 bg-stone-50/90 p-4 shadow-sm">
+				<p class="text-xs font-semibold uppercase tracking-wide text-stone-500">You</p>
+				<p class="mt-2 text-lg leading-relaxed text-stone-900">{callYouDisplay}</p>
+			</div>
 
 			{#if hasFeedback}
 				<div

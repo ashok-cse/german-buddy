@@ -7,7 +7,8 @@ import {
 	GERMAN_LEVELS,
 	type ConversationMessage,
 	type ConversationStyle,
-	type GermanLevel
+	type GermanLevel,
+	type TutorDrillMode
 } from '$lib/conversation';
 
 function isConversationMessage(v: unknown): v is ConversationMessage {
@@ -29,6 +30,10 @@ function readStyle(v: unknown): ConversationStyle {
 		: 'roleplay';
 }
 
+function readTutorDrill(v: unknown): TutorDrillMode | undefined {
+	return v === 'words' || v === 'phrases' ? v : undefined;
+}
+
 export const POST: RequestHandler = async ({ request }) => {
 	let body: unknown;
 	try {
@@ -46,10 +51,12 @@ export const POST: RequestHandler = async ({ request }) => {
 		level?: unknown;
 		scenario?: unknown;
 		style?: unknown;
+		tutorDrill?: unknown;
 	};
 
 	const level = readLevel(obj.level);
 	const style = readStyle(obj.style);
+	const tutorDrill = style === 'tutor' ? readTutorDrill(obj.tutorDrill) : undefined;
 	const scenario = typeof obj.scenario === 'string' ? obj.scenario.trim() : '';
 
 	const rawMessages = obj.messages;
@@ -72,6 +79,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			level,
 			style,
 			scenario: scenario || undefined,
+			tutorDrill,
 			history: lastN
 		});
 		return json(result);

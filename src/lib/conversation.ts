@@ -36,8 +36,23 @@ export const CONVERSATION_STYLE_LABELS: Record<ConversationStyle, string> = {
 };
 
 export const CONVERSATION_STYLE_HINTS: Record<ConversationStyle, string> = {
-	roleplay: 'AI speaks German in character. You reply in German. Immersive.',
-	tutor: 'AI gives short English instructions. You speak the German. AI corrects in English.'
+	roleplay: 'AI speaks German in character. You reply in German — like a voice call.',
+	tutor: 'English cues, then German to repeat. Toggle Word play below for single-word drills.'
+};
+
+/** Tutor-only: full phrases vs pronunciation word-play (numbers, days, chunks). */
+export type TutorDrillMode = 'phrases' | 'words';
+
+export const TUTOR_DRILL_MODES = ['phrases', 'words'] as const satisfies readonly TutorDrillMode[];
+
+export const TUTOR_DRILL_LABELS: Record<TutorDrillMode, string> = {
+	phrases: 'Phrases',
+	words: 'Word play'
+};
+
+export const TUTOR_DRILL_HINTS: Record<TutorDrillMode, string> = {
+	phrases: 'Short German lines to imitate.',
+	words: 'Single words & tiny chunks — numbers, weekdays, daily vocab.'
 };
 
 export type GermanLevel = 'A1' | 'A2' | 'B1' | 'B2';
