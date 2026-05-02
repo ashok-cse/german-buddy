@@ -34,6 +34,22 @@ function readTutorDrill(v: unknown): TutorDrillMode | undefined {
 	return v === 'words' || v === 'phrases' ? v : undefined;
 }
 
+const MAX_AVOID_WORDS = 500;
+const MAX_AVOID_TOKEN_LEN = 96;
+
+function readAvoidGermanTargets(v: unknown): string[] | undefined {
+	if (!Array.isArray(v)) return undefined;
+	const out: string[] = [];
+	for (const item of v) {
+		if (typeof item !== 'string') continue;
+		const t = item.trim();
+		if (!t || t.length > MAX_AVOID_TOKEN_LEN) continue;
+		out.push(t);
+		if (out.length >= MAX_AVOID_WORDS) break;
+	}
+	return out.length > 0 ? out : undefined;
+}
+
 export const POST: RequestHandler = async ({ request }) => {
 	let body: unknown;
 	try {
@@ -52,11 +68,14 @@ export const POST: RequestHandler = async ({ request }) => {
 		scenario?: unknown;
 		style?: unknown;
 		tutorDrill?: unknown;
+		avoidGermanTargets?: unknown;
 	};
 
 	const level = readLevel(obj.level);
 	const style = readStyle(obj.style);
 	const tutorDrill = style === 'tutor' ? readTutorDrill(obj.tutorDrill) : undefined;
+	const avoidGermanTargets =
+		style === 'tutor' && tutorDrill === 'words' ? readAvoidGermanTargets(obj.avoidGermanTargets) : undefined;
 	const scenario = typeof obj.scenario === 'string' ? obj.scenario.trim() : '';
 
 	const rawMessages = obj.messages;
@@ -80,6 +99,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			style,
 			scenario: scenario || undefined,
 			tutorDrill,
+			avoidGermanTargets,
 			history: lastN
 		});
 		return json(result);

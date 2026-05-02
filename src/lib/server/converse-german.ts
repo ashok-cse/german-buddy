@@ -7,6 +7,10 @@ import type {
 	GermanLevel,
 	TutorDrillMode
 } from '$lib/conversation';
+import {
+	extractGermanTargetsFromHistory,
+	mergeAvoidWordLists
+} from '$lib/word-play';
 
 const LEVEL_GUIDE: Record<GermanLevel, string> = {
 	A1:
@@ -44,10 +48,26 @@ Output: return ONLY valid JSON with these keys:
 - pronunciation: string (optional, ASCII pronunciation guide)`;
 }
 
-function buildWordPlayPrompt(level: GermanLevel, scenario: string | undefined): string {
+function buildWordPlayPrompt(
+	level: GermanLevel,
+	scenario: string | undefined,
+	avoidTargetsNormalized: string[]
+): string {
 	const theme = scenario?.trim()
 		? `Optional theme — bias word choice toward this setting when it fits: ${scenario.trim()}`
 		: 'Use varied everyday A1-style vocabulary (not tied to one scenario).';
+
+	const avoidBlock =
+		avoidTargetsNormalized.length > 0
+			? `
+ALREADY USED — never repeat any of these as "germanTarget" (same spelling; ä ö ü ß count as distinct). The learner is building toward 300+ different words over weeks of daily practice — each turn must add a NEW item:
+${avoidTargetsNormalized.join(', ')}
+
+If almost everything familiar is exhausted in one domain (e.g. numbers), switch domain entirely: animals, clothes, weather, body, furniture, hobbies, classroom, office, travel, food groups, verbs (infinitive), adjectives, question words, etc.
+`
+			: `
+No prior targets recorded yet — start with easy high-frequency one-word items.
+`;
 
 	return `You are an English-speaking German pronunciation coach running WORD PLAY — drilling sounds and short chunks only. This prepares beginners before full sentences.
 
@@ -55,11 +75,13 @@ ${theme}
 
 Learner level: ${level}. Keep difficulty appropriate; prefer cognates and high-frequency words.
 
+${avoidBlock}
+
 Hard rules for "germanTarget" (CRITICAL):
 - DEFAULT: exactly ONE German word — numbers as German words (eins, zwei, … dreißig), weekdays (Montag … Sonntag), months if asked, colors (rot, blau, …), common nouns (Brot, Wasser, Tür), politeness words (bitte, danke), classroom words, clock/time words (halb, Viertel), infinitive verbs as one word (gehen, kaufen).
 - ONLY where German naturally uses a frozen phrase of TWO words, you may use TWO words — never more. Examples: "guten Morgen", "guten Tag", "danke schön", "bis bald". Never output questions or dialogue sentences.
 - NEVER output a full sentence, clause, or 3+ words in "germanTarget". If you are tempted to give a sentence, split it: one word this turn, another next turn.
-- Rotate variety across turns: mix numbers, days, months, times, food, home, transport words, colors, and polite phrases so the learner practises many sounds.
+- Rotate variety across turns: mix numbers, days, months, times, food, home, transport words, colors, and polite phrases so the learner practises many sounds — but NEVER repeat an item from the ALREADY USED list above.
 
 Behaviour (same shape as the Tutor drill):
 - "assistant" is what you say IN ENGLISH only (read aloud first). One short sentence: encourage, then name the next target in English (e.g. "Great. Now try the word for Thursday.").
@@ -121,6 +143,8 @@ export type ConversationTurnInput = {
 	style: ConversationStyle;
 	/** Tutor only: `words` uses word-play prompt; default `phrases`. */
 	tutorDrill?: TutorDrillMode;
+	/** Tutor word-play: normalized-ish tokens already practiced (client + history merged server-side). */
+	avoidGermanTargets?: string[];
 	history: ConversationMessage[];
 };
 
@@ -129,10 +153,14 @@ export async function runGermanConversationTurn(
 	input: ConversationTurnInput
 ): Promise<ConversationTurnResult> {
 	const tutorDrill: TutorDrillMode = input.tutorDrill ?? 'phrases';
+	const avoidForWords =
+		input.style === 'tutor' && tutorDrill === 'words'
+			? mergeAvoidWordLists(input.avoidGermanTargets ?? [], extractGermanTargetsFromHistory(input.history))
+			: [];
 	const system =
 		input.style === 'tutor'
 			? tutorDrill === 'words'
-				? buildWordPlayPrompt(input.level, input.scenario)
+				? buildWordPlayPrompt(input.level, input.scenario, avoidForWords)
 				: buildTutorPrompt(input.level, input.scenario)
 			: buildRoleplayPrompt(input.level, input.scenario);
 

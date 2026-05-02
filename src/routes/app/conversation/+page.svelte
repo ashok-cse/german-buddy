@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
 		startGermanDictation,
@@ -28,6 +28,11 @@
 		type WordCorrection
 	} from '$lib/conversation';
 	import { diffChars } from '$lib/diff-chars';
+	import {
+		appendWordPlayBank,
+		loadWordPlayBankFromStorage,
+		saveWordPlayBankToStorage
+	} from '$lib/word-play';
 
 	type ChatPhase = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking';
 
@@ -101,6 +106,13 @@
 	const CHAT_ENGLISH_RATE = 1;
 
 	let groqSttAvailable = $state(false);
+
+	/** Persisted on this device — word-play drill only; grows toward 300+ distinct words. */
+	let wordPlayBank = $state<string[]>([]);
+
+	onMount(() => {
+		wordPlayBank = loadWordPlayBankFromStorage();
+	});
 
 	$effect(() => {
 		if (!browser) return;
@@ -227,6 +239,11 @@
 		if (chatSessionActive) endChatSession();
 	}
 
+	function clearWordPlayVocabulary(): void {
+		wordPlayBank = [];
+		saveWordPlayBankToStorage(wordPlayBank);
+	}
+
 	function scheduleAutoSubmit(): void {
 		clearChatSilenceTimer();
 		chatSilenceTimer = setTimeout(() => {
@@ -263,18 +280,12 @@
 			onError: (msg: string) => {
 				chatError = msg;
 			},
+			/** Never schedule resume here — `stopChatDictation()` runs synchronously before each fresh
+			 *  `beginListening()`, and firing `scheduleResumeListening` from this handler caused a 450ms
+			 *  mic stop/start loop (Groq + Web Speech). Resume only from TTS end, fetch paths, and buttons. */
 			onStopped: () => {
 				chatDictation = null;
 				chatLiveTranscript = '';
-				if (
-					chatSessionActive &&
-					!chatError &&
-					!chatLoading &&
-					chatPhase === 'listening' &&
-					speechSupported
-				) {
-					scheduleResumeListening();
-				}
 			}
 		};
 		chatDictation = groqSttAvailable
@@ -294,11 +305,11 @@
 		const trimmed = text.trim();
 		if (!trimmed || !ttsSupported) return;
 		const wasInSession = chatSessionActive;
+		if (wasInSession) chatPhase = 'speaking';
 		stopChatDictation();
 		clearChatSilenceTimer();
 		clearChatRestartTimer();
 		lastAssistantText = `${lastAssistantText} ${trimmed}`.trim();
-		if (wasInSession) chatPhase = 'speaking';
 		speakGerman(trimmed, {
 			rate: CHAT_GERMAN_RATE,
 			onEnd: () => {
@@ -352,6 +363,7 @@
 			if (chatSessionActive && speechSupported) scheduleResumeListening();
 			return;
 		}
+		chatPhase = 'thinking';
 		lastUserUtterance = normalizeForEcho(text);
 		callLastYou = text;
 		const next = [...chatMessages, { role: 'user', content: text } satisfies ConversationMessage];
@@ -376,7 +388,12 @@
 					style: chatStyle,
 					scenario: currentScenario.setup,
 					messages: history,
-					...(chatStyle === 'tutor' ? { tutorDrill } : {})
+					...(chatStyle === 'tutor'
+						? {
+								tutorDrill,
+								...(tutorDrill === 'words' ? { avoidGermanTargets: wordPlayBank } : {})
+							}
+						: {})
 				})
 			});
 			if (!res.ok) {
@@ -442,6 +459,11 @@
 			} else {
 				callBuddyEnglish = '';
 				callBuddyGerman = assistantText || germanTarget;
+			}
+
+			if (tutorLike && tutorDrill === 'words' && germanTarget) {
+				wordPlayBank = appendWordPlayBank(wordPlayBank, germanTarget);
+				saveWordPlayBankToStorage(wordPlayBank);
 			}
 
 			if (assistantText || germanTarget) {
@@ -594,6 +616,21 @@
 						<p class="text-xs leading-relaxed text-stone-500">
 							{TUTOR_DRILL_HINTS[tutorDrill]}
 						</p>
+						{#if tutorDrill === 'words'}
+							<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-600">
+								<span>
+									<strong class="font-semibold text-stone-800">{wordPlayBank.length}</strong>
+									distinct words saved on this device (goal: 300+ over time).
+								</span>
+								<button
+									type="button"
+									class="text-stone-500 underline decoration-stone-400/80 underline-offset-2 hover:text-stone-800"
+									onclick={clearWordPlayVocabulary}
+								>
+									Reset word list
+								</button>
+							</div>
+						{/if}
 					</div>
 				{/if}
 
