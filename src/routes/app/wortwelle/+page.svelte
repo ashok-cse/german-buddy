@@ -24,9 +24,10 @@
 	let startClientY = 0;
 	let originX = 0;
 	let originY = 0;
+	/** After fly-off, skip CSS transition when snapping to center so the next card does not slide in from the side. */
+	let suppressDeckTransition = $state(false);
 
 	const current = $derived.by(() => shuffled[index] ?? null);
-	const nextBehind = $derived.by(() => shuffled[index + 1] ?? null);
 	const atEnd = $derived(shuffled.length > 0 && index >= shuffled.length - 1);
 	const progressLabel = $derived(
 		shuffled.length ? `${index + 1} / ${shuffled.length}` : '0 / 0'
@@ -38,6 +39,7 @@
 	});
 
 	const transitionStyle = $derived.by(() => {
+		if (suppressDeckTransition) return 'none';
 		if (dragging) return 'none';
 		if (exitTo) return 'transform 0.32s cubic-bezier(0.4, 0, 0.2, 1)';
 		return 'transform 0.22s cubic-bezier(0.34, 1.3, 0.64, 1)';
@@ -53,6 +55,7 @@
 		swipeY = 0;
 		exitTo = null;
 		dragging = false;
+		suppressDeckTransition = false;
 	});
 
 	$effect(() => {
@@ -79,6 +82,7 @@
 		swipeX = 0;
 		swipeY = 0;
 		exitTo = null;
+		suppressDeckTransition = false;
 	}
 
 	function resetSwipe(): void {
@@ -86,20 +90,7 @@
 		swipeY = 0;
 		exitTo = null;
 		dragging = false;
-	}
-
-	function prevCard(): void {
-		if (index <= 0) return;
-		index -= 1;
-		revealed = false;
-		resetSwipe();
-	}
-
-	function nextCard(): void {
-		if (index >= shuffled.length - 1) return;
-		index += 1;
-		revealed = false;
-		resetSwipe();
+		suppressDeckTransition = false;
 	}
 
 	function playGerman(): void {
@@ -172,14 +163,44 @@
 		}
 	}
 
+	function endSwipeAndGoNext(): void {
+		if (index >= shuffled.length - 1) return;
+		suppressDeckTransition = true;
+		exitTo = null;
+		swipeX = 0;
+		swipeY = 0;
+		index += 1;
+		revealed = false;
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				suppressDeckTransition = false;
+			});
+		});
+	}
+
+	function endSwipeAndGoPrev(): void {
+		if (index <= 0) return;
+		suppressDeckTransition = true;
+		exitTo = null;
+		swipeX = 0;
+		swipeY = 0;
+		index -= 1;
+		revealed = false;
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				suppressDeckTransition = false;
+			});
+		});
+	}
+
 	function onTopCardTransitionEnd(e: TransitionEvent): void {
 		if (e.propertyName !== 'transform') return;
 		if (exitTo === 'next') {
-			nextCard();
+			endSwipeAndGoNext();
 			return;
 		}
 		if (exitTo === 'prev') {
-			prevCard();
+			endSwipeAndGoPrev();
 			return;
 		}
 	}
@@ -284,20 +305,8 @@
 		<div class="flex min-h-0 flex-1 flex-col items-stretch justify-center pb-1">
 			<div
 				class="relative mx-auto w-full max-w-md px-0 sm:px-1"
-				style="min-height: min(52dvh, 26rem); perspective: 1200px;"
+				style="min-height: min(52dvh, 26rem);"
 			>
-				{#if nextBehind}
-					<div
-						class="absolute inset-x-0 top-3 bottom-0 z-0 mx-auto w-[calc(100%-1.25rem)] max-w-[calc(100%-1.25rem)] rounded-2xl border border-stone-200/90 bg-stone-50/95 p-6 shadow-sm transition-transform duration-300 ease-out pointer-events-none select-none"
-						style="transform: scale(0.94) translateY(0.75rem);"
-						aria-hidden="true"
-					>
-						<p class="text-center text-sm font-medium text-stone-400 line-clamp-3">
-							{nextBehind.german}
-						</p>
-					</div>
-				{/if}
-
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
 					class="absolute inset-x-0 top-0 z-10 mx-auto w-full max-w-md cursor-grab touch-none select-none active:cursor-grabbing"
