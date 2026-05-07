@@ -5,7 +5,7 @@
 <h1 align="center">German Buddy</h1>
 
 <p align="center">
-  Your friendly buddy for everyday German — write, speak, and chat your way to fluency.
+  Your friendly buddy for everyday German — write, speak, chat, and build vocabulary.
 </p>
 
 ---
@@ -17,7 +17,7 @@ Sign-in is **Google OAuth** (Auth.js). User profiles and **7-day free trials** a
 ## Features
 
 - **Landing page (`/`)** — minimalist hero + waitlist signup for `germanbuddy.ai`.
-- **Practice app (`/app`)** — three areas:
+- **Practice app (`/app`)** — main areas:
   - **Write** — answer a prompt in German; get corrected text, a more natural phrasing, a simple English line, and one short tip.
   - **Speak** — same loop, but dictate your answer (Web Speech API where supported); prompts and corrections read aloud.
   - **Conversation** — voice session that feels like a **phone call** (no long chat history; one “Buddy / You” turn at a time). Pick **scenario**, **level** (A1–B2), and **style**:
@@ -25,6 +25,7 @@ Sign-in is **Google OAuth** (Auth.js). User profiles and **7-day free trials** a
     - **Tutor** — short English cue first, then German to repeat (same audio order). **Tutor drill**: **Phrases** (short German lines) or **Word play** (single words / tiny chunks — numbers, weekdays, daily vocab). Word play tracks distinct targets per browser (**saved vocabulary bank**, goal 300+ words over time) and sends them to the model so it avoids repeats.
   - **Speech-to-text** — when **`GROQ_API_KEY`** is set (or your chat LLM already uses Groq), Conversation prefers **Groq Whisper** (`whisper-large-v3`, German) via `POST /api/transcribe`; otherwise **Web Speech** (Chrome/Edge). Half-duplex flow: mic listens while you speak; speaker plays tutor/roleplay audio without chaining bogus “resume mic” loops.
   - Corrections in tutor mode: word-level diff highlighting, pronunciation hints, teacher feedback panel.
+  - **WortWelle** (`/app/wortwelle`) — swipe deck for **~4,000 vocabulary entries** aligned to a **90-day plan** (pick day 1–90). Each card shows German + IPA; **Listen** uses **`/api/tts`** (Piper) when configured; reveal English meaning and use case on demand. Data lives in **`src/lib/data/vocab-german-4000.json`** (generated from the workbook’s `German_4000` sheet). The server returns **only that day’s cards**, not the full list.
 - **History** — last 10 runs persist in browser `localStorage`.
 - **Google sign-in** — Auth.js session; first sign-in creates a `peoples` row in PocketBase with trial dates.
 - **Trial gate** — active trial (`today` ≤ `trial_ends` in PocketBase) required for `/app` and practice APIs; expired trial redirects to `/trial-expired`.
@@ -114,6 +115,17 @@ Local preview of the production bundle (optional):
 npm run preview
 ```
 
+## WortWelle vocab data
+
+The deck reads **`src/lib/data/vocab-german-4000.json`**. To regenerate it after you change the source spreadsheet:
+
+```bash
+pip install openpyxl   # or use a venv
+python3 scripts/export_german_vocab.py /path/to/german_4000_90_day_sheet_pronunciation.xlsx
+```
+
+The script expects a sheet named **`German_4000`** with columns such as **Day**, **German entry**, **Pronunciation (IPA)**, **English meaning**, and **Use case**.
+
 ## Deploy (Docker / EasyPanel)
 
 Multi-stage `Dockerfile` (`@sveltejs/adapter-node`): the image runs `node build`, listens on **`HOST=0.0.0.0`** and **`PORT`** (default **3000**), and includes a small HTTP health check.
@@ -143,8 +155,8 @@ After deploying, the file will be available at `/app/data/waitlist.jsonl` inside
 | `/login` | Google sign-in | public |
 | `/logout` | Clears Auth.js session, redirects | public |
 | `/auth/*` | Auth.js OAuth callbacks | public |
-| `/app`, `/app/*` | Practice app (write / speak / conversation) | Google session + **active trial** |
-| `/trial-expired` | Shown when the PocketBase trial window has ended | Google session |
+| `/app`, `/app/*` | Practice app (write / speak / conversation / **wortwelle**) | Google session + **active trial** |
+| `/app/wortwelle` | **WortWelle** — 90-day vocab swipe deck (`?day=1` … `90`) | session + trial |
 | `/dashboard` | Redirect → `/app/write` | session + trial |
 | `POST /api/correct` | `{ prompt, answer }` → corrections JSON | session + trial |
 | `POST /api/converse` | Conversation LLM (`style`, optional `tutorDrill`, optional `avoidGermanTargets` for word play) | session + trial |
@@ -169,7 +181,11 @@ After deploying, the file will be available at `/app/data/waitlist.jsonl` inside
 - **`src/lib/server/trial-access.ts`** — **`checkTrialAccessForUser`**, **`requiresTrialGate`**.
 - **`src/routes/login/`** — Google button via `@auth/sveltekit/client` **`signIn`**.
 - **`src/routes/trial-expired/`** — Trial-ended screen; load redirects to `/app` if trial is still active.
-- **`src/routes/app/+layout.svelte`** — App chrome + **sign out**.
+- **`src/routes/app/+layout.svelte`** — App chrome + **sign out** + practice tabs.
+- **`src/routes/app/wortwelle/`** — **`+page.server.ts`** filters vocab JSON by `?day=`; **`+page.svelte`** swipe UI + TTS.
+- **`src/lib/vocab-deck.ts`** — vocab types + shuffle helper.
+- **`src/lib/data/vocab-german-4000.json`** — exported 4k-row deck (see **WortWelle vocab data**).
+- **`scripts/export_german_vocab.py`** — Excel → JSON export for that deck.
 - **`src/routes/api/{correct,converse,tts,waitlist}/+server.ts`** — POST endpoints.
 - **`src/lib/prompts.ts`** / **`practice-catalog.ts`** — prompts and topics.
 - **`src/lib/conversation.ts`** — scenarios, levels (A1–B2), tutor drill modes (`phrases` / `words`).
