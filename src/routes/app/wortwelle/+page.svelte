@@ -222,33 +222,36 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="flex min-h-0 flex-1 flex-col gap-4 px-3 py-4 sm:px-6">
-	<div class="shrink-0 space-y-0.5">
-		<h1 class="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">
-			WortWelle
-			<span class="text-stone-300">·</span>
+<div class="flex min-h-0 flex-1 flex-col gap-5 px-3 py-3 sm:gap-6 sm:px-6 sm:py-4">
+	<div class="shrink-0 space-y-1.5">
+		<h1 class="text-base font-bold leading-tight tracking-tight text-stone-900 sm:text-xl">
+			<span class="text-stone-900">WortWelle</span>
+			<span class="mx-0.5 text-stone-300">·</span>
 			<span class="font-semibold text-amber-800/90">Vocab Swipe</span>
 		</h1>
 		<p class="text-xs font-medium italic text-stone-600 sm:text-sm">Swipe your German vocab</p>
-		<p class="text-xs text-stone-500 sm:text-sm">
-			Drag the card like a dating app — left for next, right for previous. Listen, then reveal English when
+		<p class="max-w-prose text-xs leading-relaxed text-stone-500 sm:text-sm">
+			Drag the card — swipe left for next, right for previous. Tap Listen for audio, then show English when
 			you’re ready.
 		</p>
 	</div>
 
-	<div class="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white/90 p-3 shadow-sm">
+	<div
+		class="flex shrink-0 flex-nowrap items-stretch gap-2 overflow-x-auto overflow-y-hidden rounded-xl border border-stone-200 bg-white/95 p-2 shadow-sm [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible"
+		style="-webkit-overflow-scrolling: touch"
+	>
 		<button
 			type="button"
-			class="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-800 transition hover:bg-stone-100 disabled:opacity-40"
+			class="shrink-0 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2 text-xs font-medium text-stone-800 transition hover:bg-stone-100 disabled:opacity-40 sm:px-3 sm:text-sm"
 			disabled={data.day <= 1}
 			onclick={() => goDay(-1)}
 		>
 			← Day
 		</button>
-		<label class="flex items-center gap-2 text-sm text-stone-600">
+		<label class="flex min-w-0 shrink-0 items-stretch">
 			<span class="sr-only">Plan day</span>
 			<select
-				class="rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm font-medium text-stone-900"
+				class="min-w-[4.5rem] rounded-lg border border-stone-200 bg-white py-2 pl-2 pr-7 text-xs font-medium text-stone-900 sm:min-w-0 sm:text-sm"
 				value={data.day}
 				onchange={setDay}
 			>
@@ -259,7 +262,7 @@
 		</label>
 		<button
 			type="button"
-			class="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-800 transition hover:bg-stone-100 disabled:opacity-40"
+			class="shrink-0 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2 text-xs font-medium text-stone-800 transition hover:bg-stone-100 disabled:opacity-40 sm:px-3 sm:text-sm"
 			disabled={data.day >= data.totalDays}
 			onclick={() => goDay(1)}
 		>
@@ -267,8 +270,9 @@
 		</button>
 		<button
 			type="button"
-			class="ml-auto rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950 transition hover:bg-amber-100/90"
+			class="shrink-0 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2 text-xs font-medium text-stone-800 transition hover:bg-stone-100 sm:ml-auto sm:px-3 sm:text-sm"
 			onclick={reshuffle}
+			title="Shuffle card order for this day"
 		>
 			Shuffle
 		</button>
@@ -277,10 +281,10 @@
 	{#if !current}
 		<p class="text-sm text-stone-500">No cards for this day.</p>
 	{:else}
-		<div class="flex min-h-0 flex-1 flex-col items-stretch justify-center pb-2">
+		<div class="flex min-h-0 flex-1 flex-col items-stretch justify-center pb-1">
 			<div
-				class="relative mx-auto w-full max-w-md px-1"
-				style="min-height: min(58dvh, 28rem); perspective: 1200px;"
+				class="relative mx-auto w-full max-w-md px-0 sm:px-1"
+				style="min-height: min(52dvh, 26rem); perspective: 1200px;"
 			>
 				{#if nextBehind}
 					<div
@@ -304,7 +308,7 @@
 					onpointercancel={onDeckPointerCancel}
 				>
 					<div
-						class="rounded-2xl border border-stone-200 bg-white p-6 shadow-lg will-change-transform"
+						class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg will-change-transform sm:p-6"
 						style="transform: translate3d({swipeX}px, {swipeY}px, 0) rotate({rotateDeg}deg); transition: {transitionStyle};"
 						ontransitionend={onTopCardTransitionEnd}
 					>
@@ -325,10 +329,12 @@
 							</div>
 						{/if}
 
-						<div class="mb-3 flex items-start justify-between gap-3">
+						<div class="mb-3 flex items-start justify-between gap-2 sm:gap-3">
 							<div class="min-w-0">
-								<p class="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-									{current.phase} · {current.theme}
+								<p
+									class="text-[10px] font-semibold uppercase leading-snug tracking-wider text-stone-400 line-clamp-2 sm:line-clamp-none"
+								>
+									{current.phase}<span class="text-stone-300"> · </span>{current.theme}
 								</p>
 								<p class="mt-1 font-mono text-xs text-stone-500">{progressLabel}</p>
 							</div>
@@ -377,29 +383,38 @@
 							</div>
 						{/if}
 
-						<p class="mt-6 text-center text-[11px] text-stone-400">
-							Drag card · ← next · → back · Space to flip
+						<p class="mt-5 text-center text-[11px] leading-snug text-stone-400">
+							Swipe · <span class="whitespace-nowrap">keys ← →</span> · Space flips meaning
 						</p>
 					</div>
 				</div>
 			</div>
 
-			<div class="mx-auto mt-2 flex w-full max-w-md gap-3">
+			<div
+				class="mx-auto mt-3 flex shrink-0 items-center justify-center gap-6 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+			>
 				<button
 					type="button"
-					class="flex-1 rounded-xl border border-stone-200 bg-white py-3 text-sm font-medium text-stone-800 shadow-sm transition hover:bg-stone-50 disabled:opacity-40"
+					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 shadow-sm transition hover:bg-stone-50 disabled:pointer-events-none disabled:opacity-35"
 					disabled={index <= 0 || !!exitTo}
 					onclick={backWithButton}
+					aria-label="Previous card"
 				>
-					Back
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+					</svg>
 				</button>
+				<span class="hidden text-[11px] text-stone-400 sm:inline">or swipe the card</span>
 				<button
 					type="button"
-					class="flex-1 rounded-xl border border-stone-200 bg-white py-3 text-sm font-medium text-stone-800 shadow-sm transition hover:bg-stone-50 disabled:opacity-40"
+					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 shadow-sm transition hover:bg-stone-50 disabled:pointer-events-none disabled:opacity-35"
 					disabled={atEnd || !!exitTo}
 					onclick={passWithButton}
+					aria-label="Next card"
 				>
-					Next
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+					</svg>
 				</button>
 			</div>
 		</div>

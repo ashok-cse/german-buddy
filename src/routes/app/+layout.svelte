@@ -4,13 +4,13 @@
 
 	let { children } = $props();
 
-	type Tab = { href: string; label: string; emoji: string };
+	type Tab = { href: string; label: string; short: string; emoji: string };
 	const tabs: Tab[] = [
-		{ href: '/app/write', label: 'Write', emoji: '✍️' },
-		{ href: '/app/speaking', label: 'Speaking', emoji: '🎙️' },
-		{ href: '/app/conversation', label: 'Conversation', emoji: '💬' },
-		{ href: '/app/wortwelle', label: 'Vocab Swipe', emoji: '💫' },
-		{ href: '/app/feedback', label: 'Feedback', emoji: '📧' }
+		{ href: '/app/write', label: 'Write', short: 'Write', emoji: '✍️' },
+		{ href: '/app/speaking', label: 'Speaking', short: 'Speak', emoji: '🎙️' },
+		{ href: '/app/conversation', label: 'Conversation', short: 'Chat', emoji: '💬' },
+		{ href: '/app/wortwelle', label: 'Vocab Swipe', short: 'Swipe', emoji: '💫' },
+		{ href: '/app/feedback', label: 'Feedback', short: 'Mail', emoji: '📧' }
 	];
 
 	const activeHref = $derived.by(() => {
@@ -36,13 +36,16 @@
 				Sign out
 			</button>
 		</div>
-		<nav class="mx-auto w-full max-w-3xl px-3 py-3 sm:px-6" aria-label="Practice mode">
+		<nav
+			class="mx-auto w-full max-w-3xl px-3 pb-3 pt-0.5 sm:px-6 sm:pb-3 sm:pt-1"
+			aria-label="Practice mode"
+		>
 			<div
-				class="-mx-3 overflow-x-auto overflow-y-hidden px-3 pb-0.5 sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0 [scrollbar-width:thin]"
+				class="overflow-x-auto overflow-y-hidden overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] sm:overflow-visible [&::-webkit-scrollbar]:hidden"
 				style="-webkit-overflow-scrolling: touch"
 			>
 				<div
-					class="flex w-max min-w-full gap-1 rounded-xl border border-stone-200 bg-stone-100/90 p-1 shadow-inner sm:w-full sm:min-w-0"
+					class="inline-flex min-h-11 w-max gap-0.5 rounded-xl bg-stone-200/50 p-0.5 sm:flex sm:w-full sm:min-w-0"
 					role="tablist"
 				>
 					{#each tabs as tab (tab.href)}
@@ -51,13 +54,18 @@
 							href={tab.href}
 							role="tab"
 							aria-selected={isActive}
+							aria-current={isActive ? 'page' : undefined}
 							data-sveltekit-preload-data="hover"
-							class="flex shrink-0 items-center justify-center gap-1 rounded-lg px-2.5 py-2 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 sm:min-w-0 sm:flex-1 sm:gap-1.5 sm:px-3 sm:text-sm {isActive
-								? 'bg-white text-stone-900 shadow-sm'
-								: 'text-stone-600 hover:text-stone-900'}"
+							title={tab.label}
+							class="flex min-h-11 min-w-0 shrink-0 items-center justify-center gap-1 rounded-[10px] px-2.5 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 active:bg-stone-100 sm:min-h-10 sm:flex-1 sm:gap-1.5 sm:px-2 sm:text-sm {isActive
+								? 'bg-white text-stone-900 shadow-sm ring-1 ring-stone-200/90'
+								: 'text-stone-600 hover:bg-stone-200/40 hover:text-stone-900'}"
 						>
-							<span aria-hidden="true" class="shrink-0">{tab.emoji}</span>
-							<span class="whitespace-nowrap">{tab.label}</span>
+							<span aria-hidden="true" class="shrink-0 text-[15px] leading-none sm:text-base"
+								>{tab.emoji}</span
+							>
+							<span class="whitespace-nowrap sm:hidden">{tab.short}</span>
+							<span class="hidden whitespace-nowrap sm:inline">{tab.label}</span>
 						</a>
 					{/each}
 				</div>
