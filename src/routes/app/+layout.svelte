@@ -9,7 +9,7 @@
 		{ href: '/app/write', label: 'Write', emoji: '✍️' },
 		{ href: '/app/speaking', label: 'Speaking', emoji: '🎙️' },
 		{ href: '/app/conversation', label: 'Conversation', emoji: '💬' },
-		{ href: '/app/wortwelle', label: 'WortWelle', emoji: '🌊' },
+		{ href: '/app/wortwelle', label: 'Vocab Swipe', emoji: '💫' },
 		{ href: '/app/feedback', label: 'Feedback', emoji: '📧' }
 	];
 

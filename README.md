@@ -25,7 +25,7 @@ Sign-in is **Google OAuth** (Auth.js). User profiles and **7-day free trials** a
     - **Tutor** — short English cue first, then German to repeat (same audio order). **Tutor drill**: **Phrases** (short German lines) or **Word play** (single words / tiny chunks — numbers, weekdays, daily vocab). Word play tracks distinct targets per browser (**saved vocabulary bank**, goal 300+ words over time) and sends them to the model so it avoids repeats.
   - **Speech-to-text** — when **`GROQ_API_KEY`** is set (or your chat LLM already uses Groq), Conversation prefers **Groq Whisper** (`whisper-large-v3`, German) via `POST /api/transcribe`; otherwise **Web Speech** (Chrome/Edge). Half-duplex flow: mic listens while you speak; speaker plays tutor/roleplay audio without chaining bogus “resume mic” loops.
   - Corrections in tutor mode: word-level diff highlighting, pronunciation hints, teacher feedback panel.
-  - **WortWelle** (`/app/wortwelle`) — swipe deck for **~4,000 vocabulary entries** aligned to a **90-day plan** (pick day 1–90). Each card shows German + IPA; **Listen** uses **`/api/tts`** (Piper) when configured; reveal English meaning and use case on demand. Data lives in **`src/lib/data/vocab-german-4000.json`** (generated from the workbook’s `German_4000` sheet). The server returns **only that day’s cards**, not the full list.
+  - **WortWelle / Vocab Swipe** (tab: **Vocab Swipe**, `/app/wortwelle`) — Tinder-style swipe deck for **~4,000 vocabulary entries** aligned to a **90-day plan** (pick day 1–90). Each card shows German + IPA; **Listen** uses **`/api/tts`** (Piper) when configured; reveal English meaning and use case on demand. Data lives in **`src/lib/data/vocab-german-4000.json`** (generated from the workbook’s `German_4000` sheet). The server returns **only that day’s cards**, not the full list.
 - **History** — last 10 runs persist in browser `localStorage`.
 - **Google sign-in** — Auth.js session; first sign-in creates a `peoples` row in PocketBase with trial dates.
 - **Trial gate** — active trial (`today` ≤ `trial_ends` in PocketBase) required for `/app` and practice APIs; expired trial redirects to `/trial-expired`.
@@ -156,7 +156,7 @@ After deploying, the file will be available at `/app/data/waitlist.jsonl` inside
 | `/logout` | Clears Auth.js session, redirects | public |
 | `/auth/*` | Auth.js OAuth callbacks | public |
 | `/app`, `/app/*` | Practice app (write / speak / conversation / **wortwelle**) | Google session + **active trial** |
-| `/app/wortwelle` | **WortWelle** — 90-day vocab swipe deck (`?day=1` … `90`) | session + trial |
+| `/app/wortwelle` | **WortWelle** (**Vocab Swipe**) — 90-day vocab deck (`?day=1` … `90`) | session + trial |
 | `/dashboard` | Redirect → `/app/write` | session + trial |
 | `POST /api/correct` | `{ prompt, answer }` → corrections JSON | session + trial |
 | `POST /api/converse` | Conversation LLM (`style`, optional `tutorDrill`, optional `avoidGermanTargets` for word play) | session + trial |
